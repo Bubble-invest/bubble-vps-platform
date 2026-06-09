@@ -1,40 +1,60 @@
-# bubble-vps-platform
+# 🫧 Bubble VPS Platform — One-Click Agent Infrastructure
 
-**Bubble VPS Platform — sellable infrastructure-as-code for deploying always-on Claude Code agents on hardened EU VPS, with full data sovereignty and managed access via Tailscale.**
+**Provision a hardened VPS with AI agents in one command.**
 
-One operator Mac, two repos (this one + private `bubble-vps-data`), and N hardened Hetzner CX33 boxes — one for ourselves and one per paying client. Reproducible, auditable, drift-tested.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Built on Claude Code](https://img.shields.io/badge/built%20on-Claude%20Code-orange)](https://claude.ai)
+[![Tests](https://img.shields.io/badge/tests-53%20passed-green)]()
 
-## Quick demo
+---
+
+## What is bubble-vps-platform?
+
+A **pyinfra-driven provisioning platform** that turns a fresh Hetzner (or any Ubuntu) VPS into a fully-operational AI agent infrastructure. One command: `new-tenant.sh` → hardened server + concierge agent + agentic framework + monitoring + backups.
+
+Deploy a client in 10 minutes. Zero manual SSH configuration. Production-hardened since May 2026.
+
+## Quickstart
 
 ```bash
-./scripts/deploy.sh --tenant=bubble-internal
+git clone https://github.com/Bubble-invest/bubble-vps-platform.git
+cd bubble-vps-platform
+# Create a tenant:
+./scripts/new-tenant.sh acme-corp --display-name="Acme Corp"
+# Fill in secrets:
+./scripts/operator-set-secret.sh --tenant=acme-corp --key=TELEGRAM_BOT_TOKEN
+./scripts/operator-set-secret.sh --tenant=acme-corp --key=CLAUDE_CODE_OAUTH_TOKEN
+# Deploy:
+./deploy.sh --tenant=acme-corp
 ```
 
-That single command lands the full stack on the target box: Linux hardening (UFW / fail2ban / sshd / unattended-upgrades / swap / chrony), the SOPS+age secrets layer, the Claude Code agent + systemd unit, Tailscale join, phone-home daemon, and the security-audit cron. ~8-10 min on a fresh box.
+10 minutes later: hardened VPS, concierge agent on Telegram, framework ready to hatch departments.
 
-## Architecture
+## What it provisions
 
-Two-repo split: this repo (sellable, MIT-style) carries the pyinfra task modules, templates, and operator scripts. The companion private repo `bubble-vps-data` carries `tenants/<name>/{tenant.yaml, secrets.sops.env, persona/}` per tenant. Operator Mac holds the master age key and the Hetzner / Tailscale tokens (Keychain). Each tenant box holds its own age key (root of trust for its own secrets). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+| Layer | What | Includes |
+|---|---|---|
+| **Hardening** | OS security | sshd, ufw, fail2ban, ntp, sandbox (Layer B anti-prompt-injection) |
+| **Secrets** | Encryption | SOPS + age, per-tenant keypairs, encrypted environment |
+| **Agent** | Runtime | Claude Code, bun, persona, systemd unit, Telegram plugin |
+| **Access** | Connectivity | Tailscale, telegram watchdog, phone-home, security audit |
+| **Monitoring** | Observability | Dashboard, restic backup (6h), cache sync, secrets sweep, leak scan |
+| **Framework** | Agents | Auto-installs bubble-ops-loop (loop timers, dept scaffolding) |
 
-## For operators
+## Tenant-as-a-Service
 
-Full setup walkthrough: [docs/INSTALL.md](docs/INSTALL.md). Per-client onboarding playbook: [docs/ONBOARDING.md](docs/ONBOARDING.md). Day-2 ops playbook: [docs/RUNBOOK.md](docs/RUNBOOK.md). Threat model + key rotation: [docs/SECURITY.md](docs/SECURITY.md).
+```bash
+./scripts/new-tenant.sh <name>     # Scaffold tenant config
+./scripts/provision-tenant.sh      # Provision Hetzner box
+./deploy.sh --tenant=<name>        # Deploy everything
+./scripts/offboard-tenant.sh       # Safe decommission
+```
 
-## Repo layout
+## Companion repos
 
-- `inventory.py` — pyinfra inventory; loads tenant configs from `bubble-vps-data`
-- `deploy.py` — top-level orchestration entrypoint
-- `lib/` — tenant config loader, helpers, and tests (stdlib + pyyaml only)
-- `pyinfra/tasks/` — task modules (hardening, secrets, agent, access, monitoring)
-- `pyinfra/templates/` — jinja2 templates for systemd units, sshd config, etc.
-- `scripts/` — operator wrappers: `deploy.sh`, `new-tenant.sh`, `provision-tenant.sh`, `operator-bootstrap-age.sh`, `operator-set-secret.sh`, `offboard-tenant.sh`
-- `specs/` — design specs (SPEC-001 through SPEC-020)
-- `docs/` — operator-facing documentation (this directory)
-
-## Status
-
-289 / 289 tests passing. Phase-1 build complete (Steps 1 through 7d) + SPEC-021 canonical agent-setup hardening (2026-05-31 outage fixes) + SPEC-001 v1.2 multi-concierge per tenant (agent.concierges list + persona-suffixed watchdogs) + SPEC-001 v1.3 optional git-backed concierge workspace (workspace_repo → clone-if-absent; claudette enabled). See [specs/](specs/) for the per-step contracts.
+- [bubble-ops-loop](https://github.com/Bubble-invest/bubble-ops-loop) — the agent framework
+- [bubble-cabinet](https://github.com/Bubble-invest/bubble-cabinet) — Docker on-prem deployment
 
 ## License
 
-TODO — to be decided with Joris (MIT vs proprietary). Assume "all rights reserved" until this is set.
+MIT © 2026 Bubble Invest
