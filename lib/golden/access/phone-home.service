@@ -1,0 +1,15 @@
+# /etc/systemd/system/phone-home.service
+# Managed by bubble-vps-platform (SPEC-015). Do not edit by hand.
+[Unit]
+Description=Bubble VPS phone-home telemetry (one-shot per timer tick)
+After=network-online.target tailscaled.service
+
+[Service]
+Type=oneshot
+User=claude
+ExecStart=/home/claude/scripts/phone-home.sh
+StandardOutput=journal
+StandardError=journal
+# No RuntimeDirectory needed — the script doesn't write any state files;
+# it only reads (env file, /proc, /home/claude/.claude) and POSTs. No
+# sudoers needed either: every read is claude-readable as-is.

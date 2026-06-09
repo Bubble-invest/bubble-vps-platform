@@ -1,0 +1,17 @@
+# /etc/systemd/system/security-audit.service
+# Managed by bubble-vps-platform (SPEC-014). Do not edit by hand.
+[Unit]
+Description=Bubble VPS security audit (one-shot per daily timer tick)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=claude
+ExecStart=/home/claude/scripts/security-audit.sh
+StandardOutput=journal
+StandardError=journal
+# The audit READS as claude (with NOPASSWD sudo for the elevated read commands
+# defined in /etc/sudoers.d/claude-security-audit). It never WRITES as claude
+# to protected paths — the /var/log/bubble-security/audit-<date>.log file is
+# created via `sudo install -m 0640 -o root -g adm` so the log file mode is
+# locked at 0640 owner root:adm regardless of umask.

@@ -1,0 +1,17 @@
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1
+findtime = {{ findtime_minutes }}m
+maxretry = {{ maxretry }}
+bantime = {{ bantime_hours }}h
+backend = systemd
+
+[sshd]
+enabled = true
+port = 22
+mode = {{ sshd_jail }}
+
+[recidive]
+enabled = true
+bantime = 1w
+findtime = 1d
+maxretry = 3

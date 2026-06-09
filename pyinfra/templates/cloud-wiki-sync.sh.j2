@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/cloud-wiki-sync.sh
+# Managed by bubble-vps-platform (SPEC-020). Do not edit by hand.
+#
+# Cloud-side reciprocal of ~/.claude/scheduled-tasks/wiki-github-sync/sync.sh
+# on the Mac. Runs every 30 min from cloud-wiki-sync.timer; pulls remote
+# changes (rebase --autostash), commits any local dirty state, pushes back.
+#
+# Auth: HTTPS basic via GITHUB_TOKEN. The token is sourced from
+# {{ decrypted_runtime_path }} into a shell var, exported into the env that
+# git inherits, and consumed by {{ credential_helper_path }} (the GIT_ASKPASS
+# script) — git NEVER sees the token in argv or in URL form, which keeps it
+# out of `ps auxww` and out of .git/config persistence.
+#
+# Conflict policy: same as Mac side. If `git pull --rebase` fails, abort the
+# rebase, restore any auto-stash, fire a Telegram alert, exit non-zero. We
+# do NOT auto-resolve — that would corrupt content.
+#
+# SPEC-008 hard rule: GITHUB_TOKEN + TELEGRAM_BOT_TOKEN are both read into
+# shell vars and `unset` at the appropriate cleanup points. The credential
+# helper itself is the only path the GitHub token takes to reach git.
+set -uo pipefail   # NOT -e: we want to handle each step explicitly so
+                   # cleanup (lock removal, unset) always runs.
+
+WIKI_DIR="{{ wiki_dir }}"
+WIKI_REMOTE_URL="{{ wiki_remote_url }}"
+LOCK_DIR="{{ lock_dir }}"
+CREDENTIAL_HELPER="{{ credential_helper_path }}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+log() { logger -t cloud-wiki-sync "$*"; }
+
+{% raw %}
+# ─── Single-instance lock ──────────────────────────────────────────────────
+# mkdir is atomic on POSIX — succeeds only if the dir doesn't exist. We use
+# it as a lock primitive (no flock dependency). On stale-lock detection (PID
+# in lockdir is dead), we clear and continue.
+acquire_lock() {
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        echo $$ > "$LOCK_DIR/pid"
+        return 0
+    fi
+    # Lock exists — check if owner is alive
+    local pid
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        log "another sync (pid $pid) still running — skip this tick"
+        return 1
+    fi
+    # Stale lock — owner is dead. Clear and retry once.
+    log "stale lock from pid ${pid:-<unknown>} — clearing and continuing"
+    rm -rf "$LOCK_DIR"
+    if mkdir "$LOCK_DIR" 2>/dev/null; then
+        echo $$ > "$LOCK_DIR/pid"
+        return 0
+    fi
+    log "ERROR: could not acquire lock after stale clear — aborting"
+    return 1
+}
+
+release_lock() {
+    rm -rf "$LOCK_DIR" 2>/dev/null || true
+}
+
+if ! acquire_lock; then
+    exit 0
+fi
+trap release_lock EXIT
+
+# ─── Sanity: wiki dir + git repo ───────────────────────────────────────────
+if [[ ! -d "$WIKI_DIR/.git" ]]; then
+    log "ERROR: $WIKI_DIR is not a git repo — was the initial clone skipped?"
+    exit 1
+fi
+
+cd "$WIKI_DIR" || { log "ERROR: cd $WIKI_DIR failed"; exit 1; }
+
+REMOTE=$(git remote get-url origin 2>/dev/null || echo "")
+if [[ -z "$REMOTE" ]]; then
+    log "ERROR: no origin remote configured — aborting"
+    exit 1
+fi
+
+# ─── Source GITHUB_TOKEN into env (NOT into URL) ───────────────────────────
+TOKEN=$(awk -F= '/^GITHUB_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+if [[ -z "${TOKEN:-}" ]]; then
+    unset TOKEN
+    log "ERROR: no GITHUB_TOKEN in $ENV_FILE — cannot pull/push"
+    exit 1
+fi
+export GITHUB_TOKEN="$TOKEN"
+unset TOKEN
+export GIT_ASKPASS="$CREDENTIAL_HELPER"
+export GIT_TERMINAL_PROMPT=0
+
+# Helper to scrub credentials from env on every exit path below
+cleanup_token() {
+    unset GITHUB_TOKEN
+    unset GIT_ASKPASS
+    unset GIT_TERMINAL_PROMPT
+}
+
+# ─── Phase 1: pull --rebase --autostash ────────────────────────────────────
+#
+# Pipefail caveat: `if ! git pull ... | logger; then $?; fi` correctly enters
+# the failure branch when EITHER stage fails (pipefail is set above), BUT
+# `$?` inside the block reflects the if-conditional, NOT the pipe's stages.
+# To get git's true exit code we MUST use ${PIPESTATUS[0]} captured
+# immediately after the pipe — even one intervening command will overwrite
+# PIPESTATUS. False positive observed 2026-05-12: a transient HTTPS
+# "Connection reset by peer" from github.com fired a misleading "rebase
+# conflict" Telegram alert because the old code logged `rc=0` (logger's
+# rc) and the branch unconditionally claimed conflict.
+#
+# Distinguishing transient failures (network, DNS, GitHub 5xx, auth glitch)
+# from REAL rebase conflicts: a real rebase that stops on conflict leaves
+# `.git/rebase-merge/` or `.git/rebase-apply/` behind. A pre-rebase failure
+# (e.g. failed fetch) does NOT — git aborts cleanly before touching the
+# index. We use the presence of those directories as the conflict signal.
+log "pulling from origin..."
+git pull --rebase --autostash 2>&1 | logger -t cloud-wiki-sync
+GIT_PULL_RC=${PIPESTATUS[0]}
+
+if [[ "$GIT_PULL_RC" -ne 0 ]]; then
+    # Check for a paused rebase (real conflict) vs a pre-rebase failure
+    # (transient network/auth issue). The conditional matches both rebase
+    # backends — `merge` is the default in modern git, `apply` is the
+    # legacy am-style backend still seen in some configs.
+    if [[ -d .git/rebase-merge ]] || [[ -d .git/rebase-apply ]]; then
+        log "ERROR: real rebase conflict (rc=$GIT_PULL_RC) — aborting + restoring stash, alerting {{OPERATOR}}."
+        git rebase --abort 2>/dev/null || true
+        git stash pop 2>/dev/null || true
+
+        # Telegram alert via direct curl. Bot token in URL — same brief
+        # ps-exposure trade-off as security-audit + telegram-watchdog.
+        BOT_TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+        if [[ -n "${BOT_TOKEN:-}" ]]; then
+            curl -s --max-time 10 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                -d chat_id="${JORIS_TG_USER_ID}" \
+                -d text="cloud-wiki-sync: rebase conflict at $(ts) on $(hostname -s). Manual resolution needed in ${WIKI_DIR}. Check journalctl -u cloud-wiki-sync.service." \
+                > /dev/null 2>&1 || log "telegram alert failed — non-fatal"
+        fi
+        unset BOT_TOKEN
+        cleanup_token
+        exit 2
+    else
+        # Transient failure (network, auth, GitHub 5xx). Don't fire a
+        # scary alert — the next 30-min tick will retry naturally.
+        log "WARN: git pull failed (rc=$GIT_PULL_RC) without leaving a paused rebase — likely transient (network/auth/GitHub-side). Skipping this tick; next timer fire will retry."
+        cleanup_token
+        exit 0
+    fi
+fi
+
+# ─── Phase 2: commit any dirty state ───────────────────────────────────────
+DIRTY_COUNT=$(git status --porcelain | wc -l | tr -d ' ')
+if [[ "$DIRTY_COUNT" -gt 0 ]]; then
+    log "committing $DIRTY_COUNT dirty file(s)"
+    if ! git add -A 2>&1 | logger -t cloud-wiki-sync; then
+        log "ERROR: git add -A failed"
+        cleanup_token
+        exit 3
+    fi
+    if ! git commit -m "cloud-wiki-sync $(date -u +%Y-%m-%dT%H:%M:%SZ): $DIRTY_COUNT files" 2>&1 | logger -t cloud-wiki-sync; then
+        log "ERROR: git commit failed"
+        cleanup_token
+        exit 3
+    fi
+fi
+
+# ─── Phase 3: push if ahead of origin ──────────────────────────────────────
+AHEAD_COUNT=$(git rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
+if [[ "$AHEAD_COUNT" -gt 0 ]]; then
+    log "pushing $AHEAD_COUNT commit(s) to origin"
+    if ! git push 2>&1 | logger -t cloud-wiki-sync; then
+        log "ERROR: push failed (will retry next tick)"
+        cleanup_token
+        exit 4
+    fi
+fi
+
+# ─── Cleanup + report ──────────────────────────────────────────────────────
+cleanup_token
+
+if [[ "$DIRTY_COUNT" -eq 0 && "$AHEAD_COUNT" -eq 0 ]]; then
+    log "no-op (clean)"
+else
+    log "ok dirty=${DIRTY_COUNT} pushed=${AHEAD_COUNT}"
+fi
+exit 0
+{% endraw %}

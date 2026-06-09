@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/phone-home.sh
+# Managed by bubble-vps-platform (SPEC-015). Do not edit by hand.
+#
+# Per-tenant phone-home telemetry daemon. Runs every 5 min from a systemd
+# timer. Collects operational metadata (NEVER data content — no message
+# bodies, no agent decisions, no file paths from the agent's work, no
+# secrets) and POSTs a single JSON payload to the central dashboard.
+#
+# Tenant: {{ tenant_name }}
+# Service watched: {{ service_name }}
+# Dashboard endpoint: {{ dashboard_url }}
+#
+# SPEC-008 hard rule: PHONEHOME_TOKEN is read from {{ decrypted_runtime_path }}
+# into a shell variable, sent ONCE in the curl Authorization: Bearer header
+# (NOT in the URL — headers don't show in `ps auxww` and don't end up in
+# proxy access logs), then immediately `unset TOKEN`. NEVER echoed to
+# stdout/stderr/journal.
+set -uo pipefail   # NOT -e: each metric collection is independent; one
+                   # failed read shouldn't abort the whole heartbeat.
+
+TENANT_NAME="{{ tenant_name }}"
+SERVICE="{{ service_name }}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+DASHBOARD_URL="{{ dashboard_url }}"
+BOT_PID_FILE="{{ bot_pid_file }}"
+
+{% raw %}
+TS_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+HOSTNAME_SHORT=$(hostname -s 2>/dev/null || hostname)
+
+# ─── Helpers ───────────────────────────────────────────────────────────────
+log() { logger -t phone-home "$*"; }
+
+# Convert "true"/"false" string into a JSON bool literal (no quotes).
+json_bool() {
+    case "$1" in
+        true|yes|1) printf "true" ;;
+        *) printf "false" ;;
+    esac
+}
+
+# Emit a JSON string (escape backslash + double-quote + control chars).
+# Used only for KNOWN-safe values (hostname, IP, version strings, service
+# name) — we never embed user-supplied or agent-supplied content here.
+json_str() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '"%s"' "$s"
+}
+
+# Emit JSON null when the value is empty/missing; otherwise emit the value
+# as a JSON string.
+json_str_or_null() {
+    if [[ -z "${1:-}" ]]; then printf "null"; else json_str "$1"; fi
+}
+
+# Emit JSON null when the value isn't a non-negative integer; otherwise the
+# raw integer (no quotes).
+json_int_or_null() {
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf "%s" "$1"; else printf "null"; fi
+}
+
+# Emit a JSON number for a float (e.g. load avg) — guards against garbage.
+json_num_or_null() {
+    if [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then printf "%s" "$1"; else printf "null"; fi
+}
+
+# ─── Host metrics ──────────────────────────────────────────────────────────
+collect_host() {
+    # Uptime in seconds (cut field 1 of /proc/uptime, drop fractional part).
+    local uptime_seconds
+    uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null)
+
+    # Disk percent used on /
+    local disk_pct
+    disk_pct=$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+
+    # Memory percent used (used/total * 100)
+    local mem_used mem_total mem_pct
+    mem_used=$(free -m 2>/dev/null | awk '/^Mem:/{print $3}')
+    mem_total=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}')
+    if [[ "${mem_total:-0}" =~ ^[0-9]+$ ]] && (( mem_total > 0 )); then
+        mem_pct=$(( mem_used * 100 / mem_total ))
+    else
+        mem_pct=""
+    fi
+
+    # Swap percent used
+    local swap_used swap_total swap_pct
+    swap_used=$(free -m 2>/dev/null | awk '/^Swap:/{print $3}')
+    swap_total=$(free -m 2>/dev/null | awk '/^Swap:/{print $2}')
+    if [[ "${swap_total:-0}" =~ ^[0-9]+$ ]] && (( swap_total > 0 )); then
+        swap_pct=$(( swap_used * 100 / swap_total ))
+    else
+        swap_pct=0
+    fi
+
+    # 1-minute load average (first field of /proc/loadavg)
+    local load_1m
+    load_1m=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
+
+    printf '"host":{'
+    printf '"hostname":%s,' "$(json_str "$HOSTNAME_SHORT")"
+    printf '"uptime_seconds":%s,' "$(json_int_or_null "$uptime_seconds")"
+    printf '"disk_pct_used":%s,' "$(json_int_or_null "$disk_pct")"
+    printf '"memory_pct_used":%s,' "$(json_int_or_null "$mem_pct")"
+    printf '"swap_pct_used":%s,' "$(json_int_or_null "$swap_pct")"
+    printf '"load_avg_1m":%s' "$(json_num_or_null "$load_1m")"
+    printf '}'
+}
+
+# ─── Agent (claude-agent-<persona>.service) metrics ────────────────────────
+collect_agent() {
+    local is_active is_enabled uptime_s restarts_24h
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        is_active="true"
+    else
+        is_active="false"
+    fi
+    if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then
+        is_enabled="true"
+    else
+        is_enabled="false"
+    fi
+
+    # Uptime: now - ActiveEnterTimestamp (seconds)
+    local since_ts since_epoch now_epoch
+    since_ts=$(systemctl show "$SERVICE" -p ActiveEnterTimestamp --value 2>/dev/null)
+    if [[ -n "$since_ts" && "$since_ts" != "n/a" ]]; then
+        since_epoch=$(date -d "$since_ts" +%s 2>/dev/null || echo 0)
+        now_epoch=$(date +%s)
+        if (( since_epoch > 0 )); then
+            uptime_s=$(( now_epoch - since_epoch ))
+        fi
+    fi
+
+    # Restart count in last 24h — tolerate missing journal access
+    restarts_24h=$(journalctl -u "$SERVICE" --since "24h ago" --no-pager 2>/dev/null \
+        | grep -cE "Started|Stopped" 2>/dev/null || echo 0)
+    restarts_24h="${restarts_24h:-0}"
+
+    printf '"agent":{'
+    printf '"service":%s,' "$(json_str "$SERVICE")"
+    printf '"is_active":%s,' "$(json_bool "$is_active")"
+    printf '"is_enabled":%s,' "$(json_bool "$is_enabled")"
+    printf '"uptime_seconds":%s,' "$(json_int_or_null "${uptime_s:-}")"
+    printf '"restarts_24h":%s' "$(json_int_or_null "$restarts_24h")"
+    printf '}'
+}
+
+# ─── Telegram plugin liveness ──────────────────────────────────────────────
+# Mirrors signals 1-2 of the watchdog (cheap, no API call to Telegram). We
+# do NOT query getWebhookInfo from the heartbeat path — the watchdog already
+# does that every 5 min and would surface a trip via restarts_24h going up.
+collect_telegram() {
+    local pid_present="false" pid_alive="false"
+    if [[ -f "$BOT_PID_FILE" ]]; then
+        pid_present="true"
+        if kill -0 "$(cat "$BOT_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+            pid_alive="true"
+        fi
+    fi
+
+    printf '"telegram":{'
+    printf '"bot_pid_present":%s,' "$(json_bool "$pid_present")"
+    printf '"bot_pid_alive":%s,' "$(json_bool "$pid_alive")"
+    # Per-spec contract: keep these fields present, even when null. Helps the
+    # dashboard render a stable shape across versions.
+    printf '"pending_update_count":null,'
+    printf '"last_error_message":null'
+    printf '}'
+}
+
+# ─── Tailscale state ───────────────────────────────────────────────────────
+collect_tailscale() {
+    local online="false" self_ip=""
+    if command -v tailscale >/dev/null 2>&1; then
+        # tailscale ip -4 returns one IPv4 per line; first line = self.
+        self_ip=$(tailscale ip -4 2>/dev/null | head -1)
+        if [[ -n "$self_ip" ]]; then
+            online="true"
+        fi
+    fi
+
+    printf '"tailscale":{'
+    printf '"online":%s,' "$(json_bool "$online")"
+    printf '"self_ip":%s' "$(json_str_or_null "$self_ip")"
+    printf '}'
+}
+
+# ─── Claude Code version ───────────────────────────────────────────────────
+collect_claude_code() {
+    # `claude --version` from non-login shell fails (fnm-managed node not on
+    # PATH). Use `bash -lc` to source .bashrc (well-known gotcha from
+    # implementation-log.md).
+    local installed_v
+    installed_v=$(bash -lc 'claude --version 2>/dev/null' 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+    # `npm view` requires network; tolerate failure with a short timeout so
+    # we don't stall the heartbeat. v1 keeps this best-effort; the dashboard
+    # treats null as "unknown" not "stale".
+    local latest_v
+    latest_v=$(timeout 5 bash -lc 'npm view @anthropic-ai/claude-code version 2>/dev/null' 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+    printf '"claude_code":{'
+    printf '"version_installed":%s,' "$(json_str_or_null "$installed_v")"
+    printf '"version_latest_npm_cached":%s' "$(json_str_or_null "$latest_v")"
+    printf '}'
+}
+
+# ─── Build payload ─────────────────────────────────────────────────────────
+PAYLOAD=$(printf '{')
+PAYLOAD+=$(printf '"schema_version":1,')
+PAYLOAD+=$(printf '"tenant_name":%s,' "$(json_str "$TENANT_NAME")")
+PAYLOAD+=$(printf '"ts_utc":%s,' "$(json_str "$TS_UTC")")
+PAYLOAD+="$(collect_host),"
+PAYLOAD+="$(collect_agent),"
+PAYLOAD+="$(collect_telegram),"
+PAYLOAD+="$(collect_tailscale),"
+PAYLOAD+="$(collect_claude_code)"
+PAYLOAD+=$(printf '}')
+
+# ─── POST ──────────────────────────────────────────────────────────────────
+# Read PHONEHOME_TOKEN from the runtime env file. It's a shared secret per
+# tenant — the dashboard validates the Bearer header against the value it
+# also reads from /run/claude-agent/env (since dashboard runs as claude on
+# the dashboard-host).
+TOKEN=$(awk -F= '/^PHONEHOME_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+if [[ -z "${TOKEN:-}" ]]; then
+    unset TOKEN
+    log "no PHONEHOME_TOKEN in ${ENV_FILE}; skipping POST (heartbeat lost)"
+    exit 0
+fi
+
+# CRITICAL: token in the Authorization header (NOT URL). Headers don't
+# appear in `ps auxww` and aren't logged by HTTP proxies' default access
+# log format.
+http_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    --data-binary "${PAYLOAD}" \
+    "${DASHBOARD_URL}" 2>/dev/null || echo "000")
+unset TOKEN
+
+if [[ "$http_status" == "200" ]]; then
+    log "ok ts=${TS_UTC} bytes=${#PAYLOAD}"
+    exit 0
+else
+    log "POST failed http_status=${http_status} ts=${TS_UTC}"
+    exit 1
+fi
+{% endraw %}

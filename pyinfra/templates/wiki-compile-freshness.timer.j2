@@ -1,0 +1,15 @@
+# /etc/systemd/system/wiki-compile-freshness.timer
+# Managed by bubble-vps-platform. Do not edit by hand.
+#
+# Fire daily at 09:00 UTC — well after the 22:00 UTC nightly compile, so a
+# missed/failed overnight run is caught before the working day.
+[Unit]
+Description=Daily wiki-compile freshness check
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 UTC
+Persistent=true
+Unit=wiki-compile-freshness.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,37 @@
+# /etc/systemd/system/bubble-dashboard.service
+# Managed by bubble-vps-platform (SPEC-015). Do not edit by hand.
+[Unit]
+Description=Bubble VPS central dashboard (Tailscale-only, port 3848)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claude
+Group=claude
+WorkingDirectory=/home/claude/dashboard
+# ExecStartPre derives BIND_ADDR from `tailscale ip -4` at every start so
+# the dashboard listens ONLY on the tailnet interface (NOT 0.0.0.0). The
+# Tailscale IP is stable per-device once registered, but we still derive
+# at boot so a re-registration doesn't strand the dashboard on a dead IP.
+# Per SPEC-015 §"Critical": defense in depth — even if UFW were
+# misconfigured, the dashboard cannot be reached from public internet.
+#
+# `+` prefix = run as root (needed to write /run/bubble-dashboard.env which
+# is owned by root by default; the dashboard process itself runs as claude).
+ExecStartPre=+/bin/sh -c 'echo "BIND_ADDR=$(/usr/bin/tailscale ip -4 | head -1)" > /run/bubble-dashboard.env'
+# `-` prefix on EnvironmentFile = optional — file is created by ExecStartPre
+# above. Without `-`, systemd fails at unit-load before ExecStartPre runs.
+# (Documented gotcha from implementation-log.md.)
+EnvironmentFile=-/run/bubble-dashboard.env
+Environment=DB_PATH=/var/lib/bubble-dashboard/heartbeats.db
+Environment=ENV_FILE=/run/claude-agent/env
+Environment=BIND_PORT=3848
+ExecStart=/usr/bin/python3 /home/claude/dashboard/app.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

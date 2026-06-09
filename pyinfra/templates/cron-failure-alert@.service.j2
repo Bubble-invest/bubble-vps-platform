@@ -1,0 +1,14 @@
+# /etc/systemd/system/cron-failure-alert@.service
+# Managed by bubble-vps-platform. Do not edit by hand.
+#
+# Generic OnFailure handler: a unit sets `OnFailure=cron-failure-alert@%n.service`
+# and systemd starts THIS with %i = the failed unit's name → Telegram alert.
+[Unit]
+Description=Telegram failure alert for %i
+
+[Service]
+Type=oneshot
+User=claude
+EnvironmentFile=-{{ decrypted_runtime_path }}
+Environment=PATH=/home/claude/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/claude/scripts/cron-failure-alert.sh %i

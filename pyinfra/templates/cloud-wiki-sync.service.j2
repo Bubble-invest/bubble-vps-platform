@@ -1,0 +1,24 @@
+# /etc/systemd/system/cloud-wiki-sync.service
+# Managed by bubble-vps-platform (SPEC-020). Do not edit by hand.
+[Unit]
+Description=Cloud wiki sync (one-shot per timer tick)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=claude
+# EnvironmentFile=- (the leading dash) makes the file optional at unit-load
+# time, so systemd doesn't fail if the secrets layer hasn't shipped the file
+# yet. The script itself enforces GITHUB_TOKEN presence and exits cleanly
+# with a logged error when missing.
+EnvironmentFile=-/run/claude-agent/env
+# RuntimeDirectory= creates /run/cloud-wiki-sync/ owned by User= (claude)
+# before ExecStart fires; cleaned up at service stop. Without this, the
+# script can't create its mkdir-as-lock under /run (which is root-owned).
+# Same pattern as telegram-watchdog.service. RuntimeDirectoryPreserve=no
+# (default) is fine here — the lock should NOT survive across timer ticks.
+RuntimeDirectory=cloud-wiki-sync
+RuntimeDirectoryMode=0755
+ExecStart=/home/claude/scripts/cloud-wiki-sync.sh
+StandardOutput=journal
+StandardError=journal

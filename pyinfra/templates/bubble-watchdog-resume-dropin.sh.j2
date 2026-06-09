@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# /usr/local/bin/bubble-watchdog-resume-dropin
+# Managed by bubble-vps-platform (SPEC-021 FIX-6, hardened per Codex P1 review
+# 2026-06-01). Do NOT edit by hand.
+#
+# ROOT-OWNED helper that installs/removes the watchdog's TRANSIENT resume
+# drop-in with FIXED, non-caller-controlled content. The telegram-watchdog runs
+# as the unprivileged `claude` user and calls this via a tightly-scoped sudoers
+# rule (`sudo /usr/local/bin/bubble-watchdog-resume-dropin install|remove <svc>`).
+#
+# WHY THIS EXISTS (the vuln it closes): the previous design granted `claude`
+# `sudo /usr/bin/tee <dropin>` with ARBITRARY stdin + `sudo systemctl
+# daemon-reload`/`start`. Pinning the filename did NOT constrain the file
+# CONTENTS, so a compromised `claude` account could write an attacker-controlled
+# `[Service]` block (e.g. `ExecStart=… as root`, or `User=root`) and escalate to
+# root via systemd. This helper removes that: the drop-in content is HARDCODED
+# here (root-owned, claude cannot edit this script), and the only caller input is
+# the service NAME, which is validated against a strict allowlist. There is no
+# path by which the caller controls a single byte of the unit override.
+set -euo pipefail
+
+ACTION="${1:-}"
+SERVICE="${2:-}"
+
+# ── Allowlist the service name. Only the known dept/concierge unit-name shapes
+#    are accepted; anything else is rejected. No wildcards, no path traversal
+#    (the name can't contain '/', '..', spaces, or metacharacters and still
+#    match this anchored pattern).
+if ! [[ "$SERVICE" =~ ^(ops-loop-[a-z0-9]+|claude-agent-[a-z0-9]+)\.service$ ]]; then
+    echo "bubble-watchdog-resume-dropin: refusing — service name '$SERVICE' not in allowlist" >&2
+    exit 2
+fi
+
+DROPIN_DIR="/etc/systemd/system/${SERVICE}.d"
+DROPIN="${DROPIN_DIR}/zz-watchdog-resume.conf"
+
+case "$ACTION" in
+  install)
+    mkdir -p "$DROPIN_DIR"
+    # FIXED content — no stdin, no caller-controlled bytes. This is byte-for-byte
+    # what the watchdog needs: reset ExecStart, then relaunch the SAME canonical
+    # command + `--continue --fork-session` so the auto-restart resumes the
+    # session instead of starting blank. Identical across all agents.
+    cat > "$DROPIN" <<'DROPIN_EOF'
+# TRANSIENT — written by bubble-watchdog-resume-dropin before a watchdog
+# recovery restart so the agent RESUMES its session instead of starting blank.
+# Removed immediately after the restart. Safe to delete + daemon-reload if seen
+# lingering (means the watchdog died mid-recovery).
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c '/usr/bin/script -qfc "/usr/bin/claude --continue --fork-session --model \"opus[1m]\" --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official" /dev/null'
+DROPIN_EOF
+    chmod 0644 "$DROPIN"
+    /usr/bin/systemctl daemon-reload
+    echo "bubble-watchdog-resume-dropin: installed $DROPIN"
+    ;;
+  remove)
+    rm -f "$DROPIN"
+    /usr/bin/systemctl daemon-reload
+    echo "bubble-watchdog-resume-dropin: removed $DROPIN"
+    ;;
+  *)
+    echo "usage: bubble-watchdog-resume-dropin install|remove <service>" >&2
+    exit 64
+    ;;
+esac

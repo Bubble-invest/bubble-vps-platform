@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/cron-failure-alert.sh
+# Managed by bubble-vps-platform. Do not edit by hand.
+#
+# Generic systemd OnFailure -> Telegram alert. Any one-shot cron wires
+# `OnFailure=cron-failure-alert@%n.service` and this pings {{OPERATOR}} with the failed
+# unit + last journal lines. Never fails loudly itself (exit 0 always).
+set -uo pipefail
+
+UNIT="${1:-unknown.unit}"
+EXTRA="${2:-}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+LOG_TAG="cron-failure-alert"
+
+log() { logger -t "$LOG_TAG" "$*" 2>/dev/null; echo "[$LOG_TAG] $*" >&2; }
+
+CTX=""
+if command -v journalctl >/dev/null 2>&1; then
+    CTX="$(journalctl -u "$UNIT" -n 6 --no-pager -o cat 2>/dev/null | tail -6 | tr '\n' ' ' | cut -c1-400)"
+fi
+
+BOT_TOKEN=""
+[[ -r "$ENV_FILE" ]] && BOT_TOKEN="$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)"
+if [[ -z "$BOT_TOKEN" ]]; then
+    log "no TELEGRAM_BOT_TOKEN in $ENV_FILE — alert for $UNIT NOT sent"; exit 0
+fi
+
+STAMP="$(date -u '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo '')"
+MSG="🔴 cron FAILED: ${UNIT}"
+[[ -n "$EXTRA" ]] && MSG="${MSG}
+${EXTRA}"
+MSG="${MSG}
+at ${STAMP}"
+[[ -n "$CTX" ]] && MSG="${MSG}
+
+last log: ${CTX}"
+
+curl -s --max-time 10 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+     -d chat_id="${JORIS_TG_USER_ID}" --data-urlencode text="$MSG" >/dev/null 2>&1 \
+    && log "failure alert sent for $UNIT" \
+    || log "warn — telegram alert curl failed for $UNIT (non-fatal)"
+exit 0

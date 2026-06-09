@@ -1,0 +1,17 @@
+# /etc/systemd/system/wiki-compile-freshness.service
+# Managed by bubble-vps-platform. Do not edit by hand.
+#
+# Daily silent-miss watchdog for the nightly wiki compile (catches a compile
+# that NEVER FIRED — which OnFailure cannot see).
+[Unit]
+Description=Wiki-compile freshness watchdog (alerts if no successful compile in ~26h)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=claude
+EnvironmentFile=-{{ decrypted_runtime_path }}
+Environment=PATH=/home/claude/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/claude/scripts/wiki-compile-freshness.sh
+StandardOutput=journal
+StandardError=journal

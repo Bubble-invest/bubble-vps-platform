@@ -1,0 +1,7 @@
+# /etc/sudoers.d/claude-security-audit
+# Managed by bubble-vps-platform (SPEC-014). Do not edit by hand.
+# Tightly scoped — only the read commands the audit needs. NOT broad sudo.
+# Includes /usr/bin/install + /usr/bin/tee + /usr/bin/grep so the script can
+# create + append to /var/log/bubble-security/audit-<date>.log (root:adm 0640)
+# and run the no-plaintext-leak scan over /home /etc /root.
+claude ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status sshd, /usr/sbin/sshd -T, /usr/bin/last -F -50, /bin/cat /etc/sudoers.d/*, /bin/cat /etc/passwd, /usr/bin/journalctl, /usr/bin/install, /usr/bin/tee, /usr/bin/grep

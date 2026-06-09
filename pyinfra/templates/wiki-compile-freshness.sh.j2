@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/wiki-compile-freshness.sh
+# Managed by bubble-vps-platform. Do not edit by hand.
+#
+# Silent-miss watchdog for the nightly wiki compile. OnFailure catches a compile
+# that runs and exits non-zero; it CANNOT catch one that never fired. This
+# alerts if no SUCCESSFUL compile (claude -p result `"subtype":"success"` +
+# `"is_error":false` in the log) happened within ~26h. Quiet when healthy.
+set -uo pipefail
+
+LOG_DIR="{{ wiki_compile_log_dir }}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+MAX_AGE_SEC={{ max_age_sec }}
+LOG_TAG="wiki-compile-freshness"
+
+log() { logger -t "$LOG_TAG" "$*" 2>/dev/null; echo "[$LOG_TAG] $*" >&2; }
+
+now=$(date -u +%s)
+newest_good_mtime=0
+if [[ -d "$LOG_DIR" ]]; then
+    while IFS= read -r f; do
+        if grep -q '"subtype":"success"' "$f" 2>/dev/null \
+           && grep -q '"is_error":false' "$f" 2>/dev/null; then
+            m=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+            (( m > newest_good_mtime )) && newest_good_mtime=$m
+        fi
+    done < <(find "$LOG_DIR" -name 'compile-compile-*.log' -type f 2>/dev/null)
+fi
+
+age=$(( now - newest_good_mtime ))
+if (( newest_good_mtime > 0 && age <= MAX_AGE_SEC )); then
+    log "OK — last successful compile ${age}s ago (<= ${MAX_AGE_SEC}s); quiet."; exit 0
+fi
+
+if (( newest_good_mtime == 0 )); then
+    detail="no successful compile log found in ${LOG_DIR}"
+else
+    hrs=$(( age / 3600 )); detail="last successful compile was ${hrs}h ago (threshold $(( MAX_AGE_SEC / 3600 ))h)"
+fi
+log "STALE — $detail"
+
+BOT_TOKEN=""
+[[ -r "$ENV_FILE" ]] && BOT_TOKEN="$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)"
+[[ -z "$BOT_TOKEN" ]] && { log "no TELEGRAM_BOT_TOKEN — stale alert NOT sent"; exit 0; }
+
+MSG="🟠 wiki-compile may be STALE
+${detail}
+(nightly transcript mining → shared wiki). Check cloud-wiki-compile-compile.timer."
+curl -s --max-time 10 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+     -d chat_id="${JORIS_TG_USER_ID}" --data-urlencode text="$MSG" >/dev/null 2>&1 \
+    && log "stale alert sent" || log "warn — telegram alert curl failed (non-fatal)"
+exit 0

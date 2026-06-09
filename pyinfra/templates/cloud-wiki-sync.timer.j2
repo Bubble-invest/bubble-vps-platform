@@ -1,0 +1,12 @@
+# /etc/systemd/system/cloud-wiki-sync.timer
+# Managed by bubble-vps-platform (SPEC-020). Do not edit by hand.
+[Unit]
+Description=Bidirectional wiki sync to GitHub (every 30 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Unit=cloud-wiki-sync.service
+
+[Install]
+WantedBy=timers.target

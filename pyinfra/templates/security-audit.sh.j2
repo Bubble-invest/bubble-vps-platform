@@ -1,0 +1,510 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/security-audit.sh
+# Managed by bubble-vps-platform (SPEC-014). Do not edit by hand.
+#
+# Daily security audit running ON THE BOX. 8 parts, score-based, posts a
+# single summary message to Telegram (chat_id={{ joris_telegram_user_id }}),
+# persists full findings to {{ audit_log_dir }}/audit-<YYYY-MM-DD>.log.
+#
+# SPEC-008 hard rule: TELEGRAM_BOT_TOKEN is read from {{ decrypted_runtime_path }}
+# into a shell variable, used briefly in HTTPS curl URLs to api.telegram.org,
+# then immediately `unset TOKEN`. NEVER echoed to stdout/stderr/journal.
+#
+# Transcript-leak scan (Part 6) uses `grep -lI` (file names only, skip
+# binaries) NOT bare `grep` — bare grep would echo the matched line, which
+# could contain the credential value being searched for (defeating the scan).
+set -uo pipefail   # NOT -e: each part is independent; one failed check
+                   # shouldn't abort the whole audit.
+
+SERVICE="{{ service_name }}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+AUDIT_LOG_DIR="{{ audit_log_dir }}"
+EXPECTED_BOX_PUBKEY="{{ expected_box_pubkey }}"
+
+{% raw %}
+DATE_STAMP=$(date -u +"%Y-%m-%d")
+TS_HUMAN=$(date -u +"%Y-%m-%d %H:%M UTC")
+HOSTNAME_SHORT=$(hostname -s 2>/dev/null || hostname)
+LOG_FILE="${AUDIT_LOG_DIR}/audit-${DATE_STAMP}.log"
+
+# Per-part summary line + score; aggregated into the final Telegram message.
+SUMMARIES=()
+SCORE_TOTAL=0
+
+# Append to the on-disk audit log via sudo tee (the log dir is root:adm 0750
+# — claude can't write to it directly). The script uses `install -m 640` for
+# the first write so the file's mode is locked at 0640 owner root:adm.
+log_init() {
+    if [[ ! -f "$LOG_FILE" ]]; then
+        sudo install -m 0640 -o root -g adm /dev/null "$LOG_FILE" 2>/dev/null || true
+    fi
+}
+log() {
+    # Append a line to the audit log via sudo tee. We never echo the line
+    # back to stdout (defense-in-depth — the journal already captures stdout
+    # via the systemd unit, but the audit log is the canonical record).
+    printf "[%s] %s\n" "$(date -u +%H:%M:%S)" "$*" \
+        | sudo tee -a "$LOG_FILE" >/dev/null 2>&1 || true
+}
+record() {
+    # record <part_num> <part_name> <part_score> <one_line_summary>
+    local n="$1" name="$2" score="$3" summary="$4"
+    local icon
+    if (( score >= 9 )); then icon="OK"
+    elif (( score >= 6 )); then icon="WARN"
+    else icon="FAIL"
+    fi
+    SUMMARIES+=("[${icon}] ${name} (${score}/10): ${summary}")
+    SCORE_TOTAL=$(( SCORE_TOTAL + score ))
+    log "Part ${n} (${name}) score=${score}: ${summary}"
+}
+
+log_init
+log "=== security audit start: ${HOSTNAME_SHORT} ${TS_HUMAN} ==="
+
+# ─── Part 1 — Auth & access ────────────────────────────────────────────────
+part_1_auth() {
+    local score=10
+    local notes=()
+
+    # fail2ban
+    local f2b_banned f2b_total
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        local f2b_status
+        f2b_status=$(sudo /usr/bin/fail2ban-client status sshd 2>/dev/null || echo "")
+        f2b_banned=$(echo "$f2b_status" | awk -F: '/Currently banned/{gsub(/[^0-9]/,"",$2); print $2}')
+        f2b_total=$(echo "$f2b_status" | awk -F: '/Total banned/{gsub(/[^0-9]/,"",$2); print $2}')
+        f2b_banned="${f2b_banned:-0}"
+        f2b_total="${f2b_total:-0}"
+        notes+=("fail2ban banned=${f2b_banned} total=${f2b_total}")
+        if (( f2b_banned > 5 )); then
+            score=$(( score - 2 ))
+        fi
+    else
+        notes+=("fail2ban not installed")
+        score=$(( score - 3 ))
+    fi
+
+    # sshd config drift — must match SPEC-005 hardening
+    local sshd_dump
+    sshd_dump=$(sudo /usr/sbin/sshd -T 2>/dev/null || echo "")
+    local pri pa mat
+    pri=$(echo "$sshd_dump" | awk '/^permitrootlogin /{print $2}')
+    pa=$(echo "$sshd_dump" | awk '/^passwordauthentication /{print $2}')
+    mat=$(echo "$sshd_dump" | awk '/^maxauthtries /{print $2}')
+    if [[ "$pri" != "no" ]]; then
+        notes+=("permitrootlogin=${pri:-?} (expected no)"); score=$(( score - 3 ))
+    fi
+    if [[ "$pa" != "no" ]]; then
+        notes+=("passwordauth=${pa:-?} (expected no)"); score=$(( score - 3 ))
+    fi
+    if [[ -n "$mat" && "$mat" != "3" ]]; then
+        notes+=("maxauthtries=${mat} (expected 3)"); score=$(( score - 1 ))
+    fi
+
+    # Sudo entries — count NOPASSWD grants. `tr -d '[:space:]'` strips any
+    # stray newlines from the count (grep -c on multi-file input can emit
+    # weird shapes; the count is what we want).
+    local sudo_grants
+    sudo_grants=$(sudo /bin/cat /etc/sudoers.d/* 2>/dev/null | grep -c "NOPASSWD" 2>/dev/null | tr -d '[:space:]')
+    sudo_grants="${sudo_grants:-0}"
+    notes+=("sudoers NOPASSWD lines=${sudo_grants}")
+
+    # /etc/passwd — count human + system accounts
+    local passwd_lines
+    passwd_lines=$(sudo /bin/cat /etc/passwd 2>/dev/null | wc -l | tr -d '[:space:]')
+    passwd_lines="${passwd_lines:-0}"
+    notes+=("passwd entries=${passwd_lines}")
+
+    if (( score < 0 )); then score=0; fi
+    record 1 "Auth & access" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 2 — Secrets layer integrity ──────────────────────────────────────
+part_2_secrets() {
+    local score=10
+    local notes=()
+
+    # /etc/age/key.txt mode (must be 400 root:root)
+    local mode_key
+    mode_key=$(stat -c "%a %U:%G" /etc/age/key.txt 2>/dev/null || echo "missing")
+    if [[ "$mode_key" != "400 root:root" ]]; then
+        notes+=("age/key.txt mode=${mode_key} (expected 400 root:root) CRITICAL")
+        score=$(( score - 5 ))
+    fi
+
+    # /etc/age/key.pub — drift check vs expected
+    if [[ -f /etc/age/key.pub ]]; then
+        local actual_pub
+        actual_pub=$(cat /etc/age/key.pub 2>/dev/null | tr -d '[:space:]')
+        if [[ -n "$EXPECTED_BOX_PUBKEY" && "$actual_pub" != "$EXPECTED_BOX_PUBKEY" ]]; then
+            notes+=("age/key.pub DRIFT (regen?) CRITICAL"); score=$(( score - 5 ))
+        fi
+    else
+        notes+=("age/key.pub missing"); score=$(( score - 2 ))
+    fi
+
+    # secrets.sops.env mode (440 root:root)
+    local mode_sops
+    mode_sops=$(stat -c "%a %U:%G" /etc/bubble/secrets.sops.env 2>/dev/null || echo "missing")
+    if [[ "$mode_sops" != "440 root:root" ]]; then
+        notes+=("sops.env mode=${mode_sops} (expected 440 root:root)"); score=$(( score - 3 ))
+    fi
+
+    # /run/claude-agent/env mode (when service active)
+    if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        local mode_run
+        mode_run=$(stat -c "%a %U:%G" "$ENV_FILE" 2>/dev/null || echo "missing")
+        if [[ "$mode_run" != "400 claude:claude" ]]; then
+            notes+=("runtime env mode=${mode_run} (expected 400 claude:claude)"); score=$(( score - 3 ))
+        fi
+        # tmpfs check on /run
+        if ! findmnt /run 2>/dev/null | grep -q tmpfs; then
+            notes+=("/run NOT tmpfs"); score=$(( score - 2 ))
+        fi
+    fi
+
+    # No-plaintext-leak scan: search /home /etc /root for known credential
+    # prefixes, EXCLUDING:
+    #   - /etc/bubble/   (where the encrypted blob legitimately lives)
+    #   - /run/          (tmpfs runtime decrypted env)
+    #   - this audit script itself (it contains the prefixes as grep needles)
+    #   - .credentials.json (Claude Code's own login store, mode 0600)
+    #   - bubble-vps-platform/ (specs/STATUS reference the prefixes in docs)
+    #   - shared-wiki/   (cross-agent wiki — by design contains prefix names
+    #     in docs/post-mortems/concept pages; multiple false positives
+    #     observed 2026-05-11 (hetzner-migration STATUS.md) and 2026-05-12
+    #     (rnd/morty-agent.md regenerated by nightly wiki-compile). The wiki
+    #     never contains REAL credential values — verified by grep for
+    #     prefix + 20-char suffix at lockdown time. Same intent as
+    #     bubble-vps-platform exclude: "documentation about creds is not
+    #     a cred leak".
+    # Use grep -lI: -l = list filenames only (NEVER echo matched lines, which
+    # would contain the credential VALUE we're hunting for). -I = skip binary
+    # files (so grep can't accidentally dump binary garbage that includes the
+    # secret bytes).
+    local leak_files=""
+    leak_files=$(sudo grep -rlI \
+        --exclude-dir=/etc/bubble \
+        --exclude-dir=/run \
+        --exclude-dir=bubble-vps-platform \
+        --exclude-dir=shared-wiki \
+        --exclude=security-audit.sh \
+        --exclude=.credentials.json \
+        -e "sk-or-v1-" \
+        -e "sk-ant-oat01-" \
+        -e "tskey-auth-" \
+        /home /etc /root 2>/dev/null | head -10 || true)
+    if [[ -n "$leak_files" ]]; then
+        local leak_count
+        leak_count=$(echo "$leak_files" | wc -l | tr -d '[:space:]')
+        notes+=("plaintext leak in ${leak_count} file(s) CRITICAL"); score=$(( score - 5 ))
+        # Log filenames ONLY, never the matched lines
+        log "Part 2 leak files: $(echo "$leak_files" | tr '\n' ' ')"
+    fi
+
+    if (( score < 0 )); then score=0; fi
+    if [[ ${#notes[@]} -eq 0 ]]; then notes+=("all modes correct, no plaintext leaks"); fi
+    record 2 "Secrets layer" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 3 — Agent behavior ───────────────────────────────────────────────
+part_3_agent() {
+    local score=10
+    local notes=()
+
+    # Service uptime
+    local since_ts uptime_h
+    since_ts=$(systemctl show "$SERVICE" -p ActiveEnterTimestamp --value 2>/dev/null)
+    if [[ -n "$since_ts" && "$since_ts" != "n/a" ]]; then
+        local since_epoch now_epoch
+        since_epoch=$(date -d "$since_ts" +%s 2>/dev/null || echo 0)
+        now_epoch=$(date +%s)
+        if (( since_epoch > 0 )); then
+            uptime_h=$(( (now_epoch - since_epoch) / 3600 ))
+            notes+=("uptime=${uptime_h}h")
+        fi
+    fi
+    if ! systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        notes+=("${SERVICE} NOT active CRITICAL"); score=$(( score - 5 ))
+    fi
+
+    # Restart count in last 24h
+    local restart_count
+    restart_count=$(sudo /usr/bin/journalctl -u "$SERVICE" --since "24h ago" --no-pager 2>/dev/null \
+        | grep -cE "Started|Stopped" || echo 0)
+    notes+=("restarts/24h=${restart_count}")
+    if (( restart_count > 10 )); then
+        notes+=("restart loop?"); score=$(( score - 3 ))
+    fi
+
+    # Telegram plugin liveness — same checks as the watchdog (signals 1-3)
+    local bot_pid_file="/home/claude/.claude/channels/telegram/bot.pid"
+    local tg_ok=1
+    if [[ ! -f "$bot_pid_file" ]]; then
+        tg_ok=0; notes+=("bot.pid missing")
+    elif ! kill -0 "$(cat "$bot_pid_file" 2>/dev/null)" 2>/dev/null; then
+        tg_ok=0; notes+=("bot.pid points to dead PID")
+    elif ! pgrep -f "bun run.*telegram" >/dev/null 2>&1; then
+        tg_ok=0; notes+=("no bun.*telegram process")
+    fi
+    if (( tg_ok == 1 )); then
+        notes+=("telegram polling")
+    else
+        score=$(( score - 3 ))
+    fi
+
+    # Tailscale online
+    if command -v tailscale >/dev/null 2>&1; then
+        local ts_online
+        ts_online=$(tailscale status --json 2>/dev/null | python3 -c \
+            'import sys,json
+try:
+    d=json.load(sys.stdin); print("yes" if d.get("Self",{}).get("Online") else "no")
+except Exception:
+    print("err")' 2>/dev/null || echo "err")
+        if [[ "$ts_online" == "yes" ]]; then
+            notes+=("tailscale online")
+        else
+            notes+=("tailscale=${ts_online}"); score=$(( score - 2 ))
+        fi
+    fi
+
+    if (( score < 0 )); then score=0; fi
+    record 3 "Agent" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 4 — Package CVEs ─────────────────────────────────────────────────
+part_4_cves() {
+    local score=10
+    local notes=()
+
+    # apt list --upgradable — count + list critical pkgs
+    local upgradable
+    upgradable=$(apt list --upgradable 2>/dev/null | tail -n +2 | wc -l)
+    notes+=("upgradable=${upgradable}")
+    if (( upgradable > 20 )); then
+        score=$(( score - 2 ))
+    fi
+
+    # Critical packages with pending updates
+    local critical_list
+    critical_list=$(apt list --upgradable 2>/dev/null \
+        | grep -E "^(openssh-server|openssh-client|sudo|openssl|libssl|curl|python3|sops|age)/" \
+        | cut -d/ -f1 | tr '\n' ',' | sed 's/,$//')
+    if [[ -n "$critical_list" ]]; then
+        notes+=("critical pending: ${critical_list}"); score=$(( score - 3 ))
+    fi
+
+    # Last unattended-upgrades run within 36h (give some slack vs the 24h spec)
+    local last_uu
+    last_uu=$(sudo /usr/bin/journalctl -u unattended-upgrades.service --since "36h ago" --no-pager 2>/dev/null \
+        | tail -1)
+    if [[ -z "$last_uu" ]]; then
+        notes+=("unattended-upgrades not run in 36h"); score=$(( score - 2 ))
+    fi
+
+    if (( score < 0 )); then score=0; fi
+    record 4 "CVEs" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 5 — Disk & memory ────────────────────────────────────────────────
+part_5_disk_mem() {
+    local score=10
+    local notes=()
+
+    # Disk
+    local disk_pct
+    disk_pct=$(df -P / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+    disk_pct="${disk_pct:-0}"
+    notes+=("/=${disk_pct}%")
+    if (( disk_pct > 85 )); then score=$(( score - 3 )); fi
+
+    # Inode
+    local ino_pct
+    ino_pct=$(df -iP / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+    ino_pct="${ino_pct:-0}"
+    if (( ino_pct > 85 )); then
+        notes+=("inode=${ino_pct}%"); score=$(( score - 2 ))
+    fi
+
+    # Memory / swap
+    local swap_used swap_total swap_pct
+    swap_used=$(free -m 2>/dev/null | awk '/^Swap:/{print $3}')
+    swap_total=$(free -m 2>/dev/null | awk '/^Swap:/{print $2}')
+    swap_used="${swap_used:-0}"; swap_total="${swap_total:-0}"
+    if (( swap_total > 0 )); then
+        swap_pct=$(( swap_used * 100 / swap_total ))
+    else
+        swap_pct=0
+    fi
+    notes+=("swap=${swap_pct}%")
+    if (( swap_pct > 50 )); then score=$(( score - 2 )); fi
+
+    # /run usage
+    local run_pct
+    run_pct=$(df -P /run 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+    run_pct="${run_pct:-0}"
+    if (( run_pct > 70 )); then
+        notes+=("/run=${run_pct}%"); score=$(( score - 1 ))
+    fi
+
+    if (( score < 0 )); then score=0; fi
+    record 5 "Disk & memory" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 6 — Transcript leak scan (G.8 ported) ────────────────────────────
+part_6_transcripts() {
+    local score=10
+    local notes=()
+
+    local transcripts_dir="/home/claude/.claude/projects"
+    if [[ ! -d "$transcripts_dir" ]]; then
+        notes+=("no transcripts dir (agent never ran?)")
+        record 6 "Transcripts" "$score" "$(IFS=', '; echo "${notes[*]}")"
+        return
+    fi
+
+    # CRITICAL: use `grep -lI` (filenames only, skip binaries) NOT bare `grep`.
+    # Bare grep would echo the matched line, which contains the credential
+    # value we're hunting for — defeating the scan.
+    local leak_files
+    leak_files=$(grep -rlI \
+        -e "sk-ant-oat01-" \
+        -e "sk-or-v1-" \
+        -e "tskey-auth-" \
+        "$transcripts_dir" 2>/dev/null || true)
+
+    if [[ -n "$leak_files" ]]; then
+        local leak_count
+        leak_count=$(echo "$leak_files" | wc -l)
+        notes+=("${leak_count} transcript(s) contain credential prefixes CRITICAL")
+        score=$(( score - 7 ))
+        # Log filenames ONLY (no content).
+        log "Part 6 transcript-leak files: $(echo "$leak_files" | tr '\n' ' ')"
+    else
+        notes+=("0 credential prefix matches")
+    fi
+
+    record 6 "Transcripts" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 7 — Claude Code version drift (G.9 ported) ───────────────────────
+part_7_claude_version() {
+    local score=10
+    local notes=()
+
+    # The audit runs AS the claude user already; just load the login env
+    # (fnm/PATH) and run claude directly. `bash -lc` reads ~/.bashrc/.profile
+    # so the fnm-managed node + global claude bin are on PATH.
+    local installed_v
+    installed_v=$(bash -lc 'claude --version 2>/dev/null' 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    installed_v="${installed_v:-unknown}"
+    notes+=("installed=${installed_v}")
+
+    # `npm view` requires network; tolerate failure.
+    local latest_v
+    latest_v=$(timeout 10 npm view @anthropic-ai/claude-code version 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    latest_v="${latest_v:-unknown}"
+    notes+=("latest=${latest_v}")
+
+    if [[ "$installed_v" != "unknown" && "$latest_v" != "unknown" \
+          && "$installed_v" != "$latest_v" ]]; then
+        # Check minor version difference — only deduct if patch gap > 5
+        local installed_patch latest_patch installed_minor latest_minor
+        installed_minor=$(echo "$installed_v" | cut -d. -f2)
+        latest_minor=$(echo "$latest_v" | cut -d. -f2)
+        installed_patch=$(echo "$installed_v" | cut -d. -f3)
+        latest_patch=$(echo "$latest_v" | cut -d. -f3)
+        if [[ "$installed_minor" != "$latest_minor" ]]; then
+            notes+=("minor drift"); score=$(( score - 2 ))
+        elif (( latest_patch - installed_patch > 5 )); then
+            notes+=("patch gap >5"); score=$(( score - 2 ))
+        fi
+    fi
+
+    if (( score < 0 )); then score=0; fi
+    record 7 "Version" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Part 8 — Hetzner Cloud Firewall ───────────────────────────────────────
+part_8_hcloud_firewall() {
+    local score=10
+    local notes=()
+
+    if ! command -v hcloud >/dev/null 2>&1; then
+        notes+=("hcloud not installed (operator-side check)")
+        record 8 "Firewall" "$score" "$(IFS=', '; echo "${notes[*]}")"
+        return
+    fi
+
+    # If hcloud is ever installed: query firewall attachment. For now: skip.
+    notes+=("hcloud present but check skipped in v1")
+    record 8 "Firewall" "$score" "$(IFS=', '; echo "${notes[*]}")"
+}
+
+# ─── Run all parts ─────────────────────────────────────────────────────────
+part_1_auth
+part_2_secrets
+part_3_agent
+part_4_cves
+part_5_disk_mem
+part_6_transcripts
+part_7_claude_version
+part_8_hcloud_firewall
+
+# ─── Build Telegram message ────────────────────────────────────────────────
+SCORE_LINE="Score: ${SCORE_TOTAL}/80"
+HEADER="Security audit — ${HOSTNAME_SHORT} — ${TS_HUMAN}"
+
+MESSAGE="${HEADER}
+${SCORE_LINE}
+
+"
+for line in "${SUMMARIES[@]}"; do
+    MESSAGE+="${line}
+"
+done
+MESSAGE+="
+Full log: ${LOG_FILE}"
+
+log "=== summary ==="
+log "${SCORE_LINE}"
+for line in "${SUMMARIES[@]}"; do
+    log "${line}"
+done
+
+# ─── Post to Telegram ──────────────────────────────────────────────────────
+#
+# Suppression flag: when invoked by the morty-agentic-audit cron (which runs
+# THIS script as a subprocess for the deterministic data layer, then sends
+# its own consolidated brief), the calling environment sets
+# `AGENTIC_AUDIT_SUPPRESS_TELEGRAM=1`. In that mode we skip the direct
+# Telegram post — findings still go to /var/log/bubble-security/, the agent
+# reads them and sends the single brief. Added 2026-05-12 after the legacy
+# direct-post path was confirmed as duplicate noise (both shell + agent
+# crons messaging the user the same morning).
+if [[ "${AGENTIC_AUDIT_SUPPRESS_TELEGRAM:-0}" == "1" ]]; then
+    log "AGENTIC_AUDIT_SUPPRESS_TELEGRAM=1 — skipping direct Telegram post (agentic cron will send consolidated brief)"
+else
+    TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+    if [[ -n "${TOKEN:-}" ]]; then
+        curl -s --max-time 15 \
+            "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${JORIS_TG_USER_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            > /dev/null 2>&1
+        unset TOKEN
+        log "posted summary to Telegram chat_id=${JORIS_TG_USER_ID}"
+    else
+        unset TOKEN
+        log "WARN: no TELEGRAM_BOT_TOKEN in ${ENV_FILE}; skipping Telegram post"
+    fi
+fi
+
+log "=== security audit done ==="
+exit 0
+{% endraw %}

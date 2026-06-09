@@ -1,0 +1,13 @@
+# /etc/systemd/system/{{ unit_basename }}.timer
+# Managed by bubble-vps-platform (SPEC-013, persona-suffixed for multi-concierge
+# per SPEC-001 v1.2). Do not edit by hand.
+[Unit]
+Description=Telegram plugin liveness watchdog — {{ persona_name }} (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit={{ unit_basename }}.service
+
+[Install]
+WantedBy=timers.target
