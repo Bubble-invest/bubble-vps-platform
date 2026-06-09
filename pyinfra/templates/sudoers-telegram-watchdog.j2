@@ -1,0 +1,27 @@
+# /etc/sudoers.d/claude-{{ unit_basename }}
+# Managed by bubble-vps-platform (SPEC-013, extended by SPEC-021; persona-suffixed
+# drop-in per SPEC-001 v1.2 multi-concierge). Do not edit by hand.
+# Tightly scoped — only the systemctl operations the watchdog needs on THIS
+# service. Recovery switched from `restart` to `stop`→`start` (SPEC-021 FIX-4a:
+# a bare restart left a zombie bun poller; a clean stop tears down the cgroup,
+# then start re-spawns), so the rule grants stop + start in place of restart.
+# `restart` is retained for backward-compat with any in-flight runs of the old
+# script; `is-active` is kept for liveness probes. Each verb is pinned to the
+# exact unit name — no wildcards, no shell metacharacters (visudo-validity is
+# enforced by the static test).
+#
+# SPEC-021 FIX-6 (resume-recovery, 2026-06-01; HARDENED per Codex P1 review).
+# The watchdog installs a TRANSIENT ExecStart drop-in (--continue --fork-session)
+# before the recovery restart so the agent resumes its session instead of
+# starting blank, then removes it.
+#
+# SECURITY: we do NOT grant raw `tee`/`mkdir`/`rm`/`daemon-reload`. An earlier
+# design did, but pinning the drop-in FILENAME does not constrain its CONTENTS —
+# a compromised `claude` account could `sudo tee` an attacker-controlled
+# `[Service]` block (ExecStart as root / User=root) then daemon-reload + start to
+# escalate to root. Instead, the watchdog calls a ROOT-OWNED helper that writes
+# FIXED, hardcoded content and validates the service name against an allowlist;
+# the caller controls no byte of the unit override. The helper does its own
+# daemon-reload, so no bare `daemon-reload` grant is needed either. Only the two
+# helper verbs (install/remove) for THIS exact service are granted.
+claude ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop {{ service_name }}, /usr/bin/systemctl start {{ service_name }}, /usr/bin/systemctl restart {{ service_name }}, /usr/bin/systemctl is-active {{ service_name }}, /usr/local/bin/bubble-watchdog-resume-dropin install {{ service_name }}, /usr/local/bin/bubble-watchdog-resume-dropin remove {{ service_name }}

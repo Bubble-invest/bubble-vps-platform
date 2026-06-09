@@ -1,0 +1,136 @@
+# /etc/systemd/system/claude-agent-{{ persona_name }}.service
+# Managed by bubble-vps-platform (SPEC-007 + SPEC-009). Do not edit by hand.
+[Unit]
+Description=Claude Agent — {{ persona_name }} ({{ tenant_name }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+{# User/Group/WorkingDirectory are parametric (Phase-0 least-privilege migration):
+   DEFAULT = the legacy shared `claude` user + /home/claude/agents/<persona> so an
+   un-opted-in render is byte-identical to the historical golden. When the deploy
+   opts a dept into its OWN OS user it passes os_user/os_group/agent_workdir
+   (e.g. agent-morty / agent-morty / /srv/agents/morty). This is a jinja comment —
+   it does NOT render. -#}
+User={{ os_user | default("claude") }}
+Group={{ os_group | default("claude") }}
+WorkingDirectory={{ agent_workdir | default("/home/claude/agents/" ~ persona_name) }}
+
+# CRITICAL: claude spawns plugin processes via `bun run`. systemd's default
+# PATH does NOT include /home/claude/.bun/bin where bun lives, so without
+# this override the Telegram plugin (and any other bun-based plugin) fails
+# silently — claude looks for `bun` on PATH, doesn't find it, and never
+# spawns the plugin process. Symptom: service is "active", but no plugin
+# child processes, no Telegram polling, messages pile up in pending_update_count.
+# Fix discovered 2026-05-09 after Joris reported "Morty doesn't receive texts".
+# Same gotcha as documented in projects/hetzner-migration/CLAUDE_AGENT_RECIPE.md
+# §"The four gotchas" #1 — applies to systemd just as it does to MCP child
+# spawning. settings.json's env.PATH is for claude's INTERNAL use; child-process
+# environment comes from the parent service's environment.
+Environment=PATH=/home/claude/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin
+
+# Per-concierge Telegram channel-state dir (SPEC-021 multi-agent finding).
+# The Telegram MCP plugin (server.ts) keeps ALL of its per-agent runtime state
+# — access.json, approved/, inbox/, .env AND bot.pid — under the directory
+# named by TELEGRAM_STATE_DIR, defaulting to ~/.claude/channels/telegram when
+# the var is UNSET. On a multi-concierge box (morty + claudette on joris-cx33)
+# leaving it unset makes BOTH pollers default to the same bare telegram/ dir →
+# they clobber each other's bot.pid and fight over the single getUpdates
+# long-poll slot (Telegram 409 Conflict). So each unit exports its OWN dir.
+# telegram_state_dir is derived (in _systemd_unit.py) from the SAME
+# lib.host_helpers.telegram_channel_dir single source that _telegram_plugin.py
+# uses to CREATE the dir — so the exported var and the created dir can never
+# diverge. morty (the original/default agent) keeps the BARE telegram/ dir so
+# its existing live channel state isn't orphaned; others get telegram-<name>/.
+Environment=TELEGRAM_STATE_DIR={{ telegram_state_dir }}
+
+# Decrypt secrets into tmpfs at startup. The `+` prefix makes ExecStartPre
+# run as root (overriding User=claude) so it can read the age private key
+# at {{ age_key_path }}. The decrypted file is then chowned to claude so
+# the service process can read it.
+#
+# runtime_env_dir is PER-CONCIERGE (SPEC-001 v1.2 multi-concierge): the primary
+# concierge keeps the historical /run/claude-agent (so morty's live unit does
+# not churn), additional concierges decrypt into their own /run/claude-agent-<name>
+# so two concierges on one box never clobber each other's tmpfs env file.
+ExecStartPre=+/bin/mkdir -p {{ runtime_env_dir }}
+ExecStartPre=+/bin/chown {{ os_user | default("claude") }}:{{ os_group | default("claude") }} {{ runtime_env_dir }}
+ExecStartPre=+/bin/chmod 0750 {{ runtime_env_dir }}
+ExecStartPre=+/bin/sh -c 'SOPS_AGE_KEY_FILE={{ age_key_path }} {{ sops_bin }} --decrypt --output {{ decrypted_runtime_path }}.tmp {{ encrypted_file_path }}'
+{% if bot_token_secret_ref and bot_token_secret_ref != "TELEGRAM_BOT_TOKEN" -%}
+{#- Per-concierge Telegram-token remap (SPEC-001 v1.2 multi-concierge, blocker #1). -#}
+# Per-concierge Telegram-token remap (SPEC-001 v1.2 multi-concierge, blocker #1).
+# All concierges share ONE encrypted blob. The Telegram plugin reads the bot
+# token from the env var named EXACTLY TELEGRAM_BOT_TOKEN, but this concierge's
+# token lives under {{ bot_token_secret_ref }}= in the blob. Without remapping,
+# this concierge would inherit the primary's TELEGRAM_BOT_TOKEN and talk on the
+# wrong bot. So: drop any literal TELEGRAM_BOT_TOKEN= line, then promote
+# {{ bot_token_secret_ref }}= -> TELEGRAM_BOT_TOKEN=. Mirrors the proven
+# bubble-ops-loop department pattern.
+#
+# The remap runs grep/sed on the ALREADY-DECRYPTED tmpfs file (.tmp), NOT on
+# sops output: the box's sops-guard wrapper BLOCKS "decrypt to stdout" (the pipe
+# / redirect form) outside trusted services — but it only governs the sops
+# invocation itself. The decrypt step above keeps the guard-approved
+# `--decrypt --output FILE` form; this grep/sed works purely on plaintext that
+# already lives on tmpfs. The token value is matched/rewritten in-file and never
+# echoed to stdout/journal (token hygiene preserved).
+#
+# FAIL-SAFE GUARD (Codex P1): the remap only strips the primary
+# TELEGRAM_BOT_TOKEN= line WHEN this concierge's ref ({{ bot_token_secret_ref }})
+# is ACTUALLY PRESENT in the decrypted blob. The previous form stripped the
+# primary line unconditionally, THEN renamed — so a typo'd / missing ref left
+# the agent with NO TELEGRAM_BOT_TOKEN at all (silent Telegram-auth death). Now
+# the `grep -q "^<REF>="` precondition (name-only — anchored key match, no value
+# to stdout) decides: present → strip-primary + rename-ref (correct remap);
+# absent → REFUSE (exit 1) so the ExecStartPre fails loudly and visibly rather
+# than silently blanking the token. The error message prints only the KEY NAME,
+# never a token value (token hygiene preserved). A loud failure the deploy/
+# verify catches beats a silent tokenless agent.
+ExecStartPre=+/bin/sh -c 'if grep -q "^{{ bot_token_secret_ref }}=" {{ decrypted_runtime_path }}.tmp; then grep -v "^TELEGRAM_BOT_TOKEN=" {{ decrypted_runtime_path }}.tmp | sed "s/^{{ bot_token_secret_ref }}=/TELEGRAM_BOT_TOKEN=/" > {{ decrypted_runtime_path }}.remap.tmp && rm {{ decrypted_runtime_path }}.tmp && mv {{ decrypted_runtime_path }}.remap.tmp {{ decrypted_runtime_path }}; else echo "bubble: bot_token_secret_ref {{ bot_token_secret_ref }} not found in env — refusing to blank TELEGRAM_BOT_TOKEN" >&2; exit 1; fi'
+{% else -%}
+ExecStartPre=+/bin/mv {{ decrypted_runtime_path }}.tmp {{ decrypted_runtime_path }}
+{%- endif %}
+ExecStartPre=+/bin/chmod 0400 {{ decrypted_runtime_path }}
+ExecStartPre=+/bin/chown {{ os_user | default("claude") }}:{{ os_group | default("claude") }} {{ decrypted_runtime_path }}
+
+# `-` prefix on EnvironmentFile makes it optional at unit-load time. The
+# file is created by the ExecStartPre chain above. Without the `-`, systemd
+# tries to load the file at the very first activation step and fails with
+# "Failed to load environment files: No such file or directory" before
+# ExecStartPre ever runs (observed on Ubuntu 24.04 + systemd 255).
+EnvironmentFile=-{{ decrypted_runtime_path }}
+# claude detects no-TTY and switches to --print mode (which then errors on
+# missing prompt). The interactive REPL needs a pty. `script -qfc CMD /dev/null`
+# allocates a pty, runs CMD inside it, and discards typescript output. This
+# matches what tmux did in the legacy setup, but as a foreground process
+# systemd can supervise (Type=simple).
+#
+# Permission mode: --dangerously-skip-permissions (canonical alias for
+# bypassPermissions per Anthropic docs §"Skip all checks"). This mode CANNOT
+# be activated from settings.json defaultMode alone — it MUST be passed as a
+# CLI flag at session start.
+#
+# Why this is acceptable here: joris-cx33 is an isolated single-tenant VM
+# (Hetzner CX33). Per the doc's own guidance: "Only use this mode in isolated
+# environments like containers, VMs, or dev containers". auto mode is
+# unreachable due to TTY-bound opt-in; acceptEdits still prompts on every
+# Bash; this flag is the only way to fully eliminate prompts in headless ops.
+#
+# Wrapped in /bin/sh -c "..." because systemd's ExecStart parser splits on
+# whitespace inside single-quoted args (verified 2026-05-09: without the sh
+# wrapper, systemd unquoted the script -qfc argument and passed each token
+# as a separate argv to script, breaking the launch).
+ExecStart=/bin/sh -c '/usr/bin/script -qfc "{{ claude_bin }} --dangerously-skip-permissions --channels {{ channels }}" /dev/null'
+
+Restart={{ restart }}
+RestartSec={{ restart_sec }}
+LimitNOFILE={{ nofile_limit }}
+
+# Decrypted env file is removed when service stops — defense in depth even
+# though /run is tmpfs.
+ExecStopPost=+/bin/rm -f {{ decrypted_runtime_path }}
+
+[Install]
+WantedBy=multi-user.target

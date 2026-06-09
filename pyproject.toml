@@ -1,0 +1,14 @@
+[project]
+name = "bubble-vps-platform"
+version = "0.1.0"
+description = "Reusable VPS deployment platform for Bubble Invest tenants (pyinfra-driven)."
+requires-python = ">=3.10"
+dependencies = [
+    "pyinfra>=3.8",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]

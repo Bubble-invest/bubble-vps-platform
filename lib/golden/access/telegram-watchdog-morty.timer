@@ -1,0 +1,13 @@
+# /etc/systemd/system/telegram-watchdog-morty.timer
+# Managed by bubble-vps-platform (SPEC-013, persona-suffixed for multi-concierge
+# per SPEC-001 v1.2). Do not edit by hand.
+[Unit]
+Description=Telegram plugin liveness watchdog — morty (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=telegram-watchdog-morty.service
+
+[Install]
+WantedBy=timers.target

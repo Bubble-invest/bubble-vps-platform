@@ -1,0 +1,28 @@
+# /etc/systemd/system/telegram-watchdog-morty.service
+# Managed by bubble-vps-platform (SPEC-013, persona-suffixed for multi-concierge
+# per SPEC-001 v1.2). Do not edit by hand.
+#
+# unit_basename is PERSONA-SUFFIXED (telegram-watchdog-<name>) so that multiple
+# concierges on one box (e.g. morty + claudette) each get their OWN watchdog
+# units, script, sudoers drop-in, and RuntimeDirectory with NO collision.
+[Unit]
+Description=Telegram plugin liveness watchdog — morty (one-shot per timer tick)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=claude
+# RuntimeDirectory= tells systemd to create /run/telegram-watchdog-morty/ owned by
+# the service's User= (claude) before ExecStart fires, and clean it up when
+# the service exits. Without this, the watchdog's cooldown-mark touch
+# (/run/telegram-watchdog-morty/last-restart) fails with "Permission denied"
+# because /run is root-owned. RuntimeDirectoryPreserve=yes keeps the dir
+# across the oneshot exit so consecutive timer ticks see prior cooldown
+# state — discovered 2026-05-09 during SPEC-013 smoke test (the cooldown
+# gate was silently no-oping because the mark file couldn't be written).
+RuntimeDirectory=telegram-watchdog-morty
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/home/claude/scripts/telegram-watchdog-morty.sh
+# Allow sudo systemctl restart without password (configured separately via
+# /etc/sudoers.d/claude-telegram-watchdog).

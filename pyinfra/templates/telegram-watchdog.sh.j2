@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+# /home/claude/scripts/{{ unit_basename }}.sh
+# Managed by bubble-vps-platform (SPEC-013; persona-suffixed for multi-concierge
+# per SPEC-001 v1.2). Do not edit by hand.
+#
+# Liveness watchdog for the bun-based Telegram MCP plugin running INSIDE
+# {{ service_name }}. systemd sees the parent claude process as "active"
+# even when the plugin child has died/stuck — this watchdog catches that
+# failure mode every 5 min and restarts the service to re-spawn the plugin.
+#
+# SPEC-008 hard rule: TELEGRAM_BOT_TOKEN is read from {{ decrypted_runtime_path }}
+# into a shell variable, used briefly in curl URLs (HTTPS), then immediately
+# `unset TOKEN`. NEVER echoed to stdout/stderr/journal.
+set -uo pipefail   # NOT -e: we want to handle each check, not abort on first
+
+SERVICE="{{ service_name }}"
+BOT_PID_FILE="{{ bot_pid_file }}"
+ENV_FILE="{{ decrypted_runtime_path }}"
+LAST_RESTART_MARK="{{ last_restart_mark }}"
+COOLDOWN_SECONDS={{ cooldown_seconds }}
+JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+# Session-transcript dir for THIS agent (workdir with / → -). The 401 auth
+# probe tails the newest jsonl here. See SPEC-021 invariant #4.
+SESSION_PROJECTS_DIR="{{ session_projects_dir }}"
+
+ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+log() { logger -t telegram-watchdog "$*"; }
+
+# is_bun_telegram_alive_in_cgroup — return 0 iff a bun process belonging to
+# THIS service's cgroup is running.
+#
+# Why NOT a bare fleet-wide `pgrep -f` on the bun/telegram command line: on a
+# multi-agent box every department runs its own bun-based Telegram poller, so
+# an unscoped command-line match hits ANY agent's poller and returns "alive"
+# even when THIS service's poller is dead — a false negative that leaves a
+# broken agent unrecovered
+# (FIX-3 / SPEC-021 invariant #4). We scope the check to the service's own
+# cgroup instead: systemd parents every process the unit spawns (claude + its
+# bun children) under /sys/fs/cgroup/...<service>... so we ask systemd for the
+# unit's MainPID, then look for a `bun` process whose /proc/<pid>/cgroup names
+# this service. Robust because it relies on systemd's own accounting, not on a
+# command-line substring shared across agents.
+is_bun_telegram_alive_in_cgroup() {
+    local main_pid
+    main_pid=$(systemctl show "$SERVICE" -p MainPID --value 2>/dev/null || echo 0)
+    # MainPID==0 means systemd considers the service down — definitely broken.
+    [[ "$main_pid" =~ ^[0-9]+$ ]] || return 1
+    (( main_pid > 0 )) || return 1
+    # Walk every bun process and keep only those whose cgroup line names this
+    # service. pgrep -x matches the exact command name "bun" (the poller is
+    # `bun server.ts` / `bun run ...`, argv[0] is bun) — far narrower than the
+    # old -f substring scan and immune to other agents' bun processes because
+    # of the cgroup filter below.
+    local pid
+    for pid in $(pgrep -x bun 2>/dev/null); do
+        if grep -qs "$SERVICE" "/proc/$pid/cgroup" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ─── Detection signals ─────────────────────────────────────────────────────
+broken=0
+reason=""
+
+# Signal 1+2 (primary, per-agent): bot.pid present + its PID alive. Each
+# agent's channel dir has its OWN bot.pid, so these signals are already scoped
+# to THIS agent — they remain the primary liveness signal.
+if [[ ! -f "$BOT_PID_FILE" ]]; then
+    broken=1; reason="bot.pid missing"
+elif ! kill -0 "$(cat "$BOT_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    broken=1; reason="bot.pid points to dead PID"
+# Signal 3 (cgroup-scoped): a bun poller process exists within THIS service's
+# cgroup. Replaces the old unscoped command-line pgrep which gave false
+# negatives on a multi-agent box (FIX-3 — see the helper above).
+elif ! is_bun_telegram_alive_in_cgroup; then
+    broken=1; reason="no bun poller in ${SERVICE} cgroup"
+fi
+
+# Check 4 (only if process-level checks pass): pending_update_count.
+# Per SPEC-013, some pending is normal during processing; >5 sustained means
+# the plugin isn't consuming the queue.
+if [[ $broken -eq 0 ]]; then
+    TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+    if [[ -n "${TOKEN:-}" ]]; then
+        pending=$(curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/getWebhookInfo" \
+                   | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("result",{}).get("pending_update_count",0))' 2>/dev/null || echo 0)
+        unset TOKEN
+        if [[ "$pending" =~ ^[0-9]+$ ]] && (( pending > 5 )); then
+            broken=1; reason="pending_update_count=$pending (plugin not polling)"
+        fi
+    else
+        unset TOKEN
+    fi
+fi
+
+# Signal 5 (wedged bridge / "armed but deaf") — SPEC-021 FIX-5, added after the
+# 2026-06-01 Morty outage. All four signals above can pass while the agent is
+# still deaf: the plugin is up (bot.pid alive, bun poller in cgroup) and the
+# poller DRAINS updates (pending returns to 0, so Check 4's >5 never trips) —
+# but the SDK's poller->session bridge is wedged and NO session transcript gets
+# written. Symptom: messages vanish, agent never replies, systemd says active.
+# This is what a plain `systemctl restart` (instead of the watchdog's clean
+# stop->start) can leave behind.
+#
+# Detection without consuming any Telegram update (we must NOT call getUpdates —
+# that would steal the user's messages). We use two non-consuming facts:
+#   - bot.pid mtime  = when the plugin last (re)armed the poller.
+#   - newest session-transcript mtime = when the agent last actually ingested.
+# A healthy agent writes a transcript line within seconds of ingesting. If the
+# plugin armed a while ago (> WEDGE_MIN_ARM_SEC, so this isn't a fresh boot) AND
+# the newest transcript is still older than the arm time by > WEDGE_STALE_SEC
+# AND the poller HAS consumed traffic since arming (pending dropped from >0 to
+# ~0 across ticks, tracked in WEDGE_STATE), the bridge is wedged. We persist the
+# previous pending value in a /run (tmpfs) state file so "traffic was consumed"
+# is observable across 5-min ticks without ever calling getUpdates.
+WEDGE_MIN_ARM_SEC=600     # plugin must have been armed >10min (skip fresh boots)
+WEDGE_STALE_SEC=900       # transcript silent >15min past arm time = suspicious
+WEDGE_STATE="/run/telegram-watchdog-{{ persona_name }}/last-pending"
+if [[ $broken -eq 0 ]]; then
+    now=$(date +%s)
+    armed_at=0
+    [[ -f "$BOT_PID_FILE" ]] && armed_at=$(stat -c %Y "$BOT_PID_FILE" 2>/dev/null || echo 0)
+    newest_tx=0
+    if [[ -d "$SESSION_PROJECTS_DIR" ]]; then
+        nf=$(ls -t "$SESSION_PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1)
+        [[ -n "${nf:-}" ]] && newest_tx=$(stat -c %Y "$nf" 2>/dev/null || echo 0)
+    fi
+    # Track pending across ticks (non-consuming getWebhookInfo) to confirm the
+    # poller actually consumed traffic since arming.
+    prev_pending=$(cat "$WEDGE_STATE" 2>/dev/null || echo 0)
+    cur_pending=0
+    TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+    if [[ -n "${TOKEN:-}" ]]; then
+        cur_pending=$(curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/getWebhookInfo" \
+                       | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d.get("result",{}).get("pending_update_count",0))' 2>/dev/null || echo 0)
+        unset TOKEN
+    else
+        unset TOKEN
+    fi
+    [[ "$cur_pending" =~ ^[0-9]+$ ]] || cur_pending=0
+    [[ "$prev_pending" =~ ^[0-9]+$ ]] || prev_pending=0
+    mkdir -p "$(dirname "$WEDGE_STATE")"
+    echo "$cur_pending" > "$WEDGE_STATE"
+
+    # "Consumed traffic since arming": either we saw pending>0 last tick and
+    # it's drained now, OR a transcript exists that is NEWER than arm time
+    # (proof the bridge worked at least once since arming → NOT wedged).
+    if (( armed_at > 0 && now - armed_at > WEDGE_MIN_ARM_SEC )) \
+       && (( newest_tx < armed_at )) \
+       && (( now - newest_tx > WEDGE_STALE_SEC )) \
+       && (( prev_pending > 0 )); then
+        broken=1
+        reason="wedge: plugin armed $((now-armed_at))s ago, no transcript since (last write $((now-newest_tx))s ago) but poller drained ${prev_pending} update(s) — bridge deaf"
+    fi
+fi
+
+# Signal 6 (deaf-drop / unanswered enqueue) — SPEC-021 FIX-6, added after the
+# 2026-06-01 Tony deaf incident. This catches the failure Signal 5 MISSES: the
+# CC-core notification drop (upstream anthropics/claude-code #61797 — "MCP
+# notifications silently dropped to idle session via --channels"). The poller
+# drains the inbound so fast that pending is ~always 0 at tick time, so Signal
+# 5's `prev_pending>0` gate never trips. So instead of inferring deafness from
+# pending, we read it DIRECTLY from the transcript: an inbound that was enqueued
+# (a `queue-operation`/`enqueue`/`<channel ...>` line in the newest jsonl) but
+# has NO assistant turn written after it, and has been stale > DEAF_GRACE_SEC.
+#
+# Decisive evidence this is real: Tony's session 8ea35072 — inbound enqueued at
+# 13:40:21, NEVER dequeued, restart at 14:07 cleared it; that session had 0
+# subagents / 0 mcp-add. The drop is in CC core, downstream of the poller.
+#
+# False-positive guards:
+#   - DEAF_GRACE_SEC gives a legitimately-long assistant turn time to land
+#     AFTER the enqueue before we call it deaf. Opus turns that fan out to
+#     subagents routinely run many minutes, so this is generous (was 120s —
+#     far too short; a 4-subagent Opus translation tripped it repeatedly and
+#     the --continue resume RE-LAUNCHED the same long task → restart loop,
+#     Morty 2026-06-02).
+#   - We only flag when the LAST enqueue has NO assistant line after it.
+#   - BUSY GUARD (2026-06-02): a long turn driven by subagents writes NOTHING
+#     to the MAIN transcript after the enqueue until it completes — the work
+#     lands in SESSION/<id>/subagents/*.jsonl, and tool_use/tool_result lines
+#     accrue on the main transcript. So before calling it deaf we check two
+#     signs of a live, working turn and SKIP if either holds:
+#       (a) an active subagent transcript written within the grace window, or
+#       (b) tool_use / tool_result activity after the enqueue line.
+#     Either means the turn is progressing (not a CC-core drop) → not deaf.
+#   - Pure file-tail: no Telegram API call, no getUpdates, no message theft.
+DEAF_GRACE_SEC=300
+if [[ $broken -eq 0 ]] && [[ -d "$SESSION_PROJECTS_DIR" ]]; then
+    nf6=$(ls -t "$SESSION_PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1)
+    if [[ -n "${nf6:-}" ]]; then
+        # Line number of the LAST inbound-enqueue marker in the transcript.
+        # The telegram bridge enqueues inbound as a `queue-operation` with
+        # "operation":"enqueue" wrapping a `<channel ...telegram...>` payload.
+        # deaf-trigger candidates = REAL inbound enqueues only. EXCLUDE the
+        # watchdog's OWN injections (boot-rearm system msg + --continue resume
+        # "Continue from where you left off." / isMeta:true) else Signal-6
+        # self-triggers an hourly restart loop (Maya 2026-06-07).
+        # Match a GENUINE inbound only: enqueue op OR a real <channel...telegram>
+        # content line. EXCLUDE dequeue (a CONSUMED msg; old grep matched
+        # `queue-operation` for both enqueue+dequeue -> trailing dequeue wrongly
+        # flagged deaf, Maya 2026-06-07) + the watchdog's own injections.
+        last_enq=$(grep -nE '"operation":"enqueue"|<channel[^>]*telegram' "$nf6" 2>/dev/null \
+                    | grep -vE 'ops-loop-boot-rearm|Continue from where you left off|"isMeta":[[:space:]]*true|"operation":"dequeue"' \
+                    | tail -1 | cut -d: -f1)
+        if [[ -n "${last_enq:-}" ]] && [[ "$last_enq" =~ ^[0-9]+$ ]]; then
+            # Is there an assistant turn AFTER that enqueue line? If yes, the
+            # bridge delivered → not deaf. tail from the line after the enqueue.
+            after=$(tail -n "+$((last_enq + 1))" "$nf6" 2>/dev/null \
+                     | grep -cE '"role":"assistant"|"type":"assistant"' 2>/dev/null || echo 0)
+            [[ "$after" =~ ^[0-9]+$ ]] || after=0
+            # Staleness: how long since the transcript was last written. If the
+            # enqueue is recent (< grace), give the turn time to land.
+            now6=$(date +%s)
+            tx_mtime=$(stat -c %Y "$nf6" 2>/dev/null || echo "$now6")
+
+            # BUSY GUARD (a): an active subagent transcript means a tool call is
+            # in flight — the main transcript stays silent until it returns.
+            # The subagents dir is SESSION/<session-id-without-.jsonl>/subagents/.
+            busy=0
+            sub_dir="${nf6%.jsonl}/subagents"
+            if [[ -d "$sub_dir" ]]; then
+                # any subagent jsonl modified within DEAF_GRACE_SEC of now?
+                if [[ -n "$(find "$sub_dir" -name '*.jsonl' -newermt "-${DEAF_GRACE_SEC} seconds" -print -quit 2>/dev/null)" ]]; then
+                    busy=1
+                fi
+            fi
+            # BUSY GUARD (b): tool_use / tool_result activity after the enqueue
+            # — the turn is doing work even if no assistant text landed yet.
+            if (( busy == 0 )); then
+                tools_after=$(tail -n "+$((last_enq + 1))" "$nf6" 2>/dev/null \
+                               | grep -cE '"type":"tool_(use|result)"' 2>/dev/null || echo 0)
+                [[ "$tools_after" =~ ^[0-9]+$ ]] || tools_after=0
+                (( tools_after > 0 )) && busy=1
+            fi
+
+            if (( after == 0 )) && (( busy == 0 )) && (( now6 - tx_mtime > DEAF_GRACE_SEC )); then
+                broken=1
+                reason="deaf: inbound enqueued (line $last_enq) with no assistant turn or active subagent/tool work after it; transcript silent $((now6 - tx_mtime))s — CC-core notification drop (#61797)"
+            fi
+        fi
+    fi
+fi
+
+if [[ $broken -eq 0 ]]; then
+    log "ok"
+    exit 0
+fi
+
+# ─── 401 / auth-failure probe (BEFORE any restart) ──────────────────────────
+# A restart can fix a zombie/stuck plugin, but it CANNOT fix expired or revoked
+# credentials — claude will boot, immediately hit "401 Invalid authentication
+# credentials" (or print "Please run /login"), and exit, so the watchdog would
+# restart-loop forever while the agent never recovers. Worse, on a fleet a
+# single expired subscription token can make EVERY department's watchdog thrash
+# at once. So before we touch the service we tail this agent's newest session
+# transcript and look for the auth-failure fingerprint. If we find it: alert
+# the operator ONCE per cooldown window and exit WITHOUT restarting (FIX-4b /
+# SPEC-021 invariant #4 — the "fleet-wide 401" failure mode).
+auth_failed=0
+if [[ -d "$SESSION_PROJECTS_DIR" ]]; then
+    # Newest jsonl by mtime. ls -t is fine here (paths are platform-controlled,
+    # no spaces). Guard with 2>/dev/null so an empty dir doesn't error.
+    newest_jsonl=$(ls -t "$SESSION_PROJECTS_DIR"/*.jsonl 2>/dev/null | head -1)
+    if [[ -n "${newest_jsonl:-}" ]]; then
+        # Only scan the tail — transcripts grow large and the auth error, if
+        # present, is in the most recent turns. grep -q exits 0 on first match.
+        if tail -n 200 "$newest_jsonl" 2>/dev/null \
+             | grep -qE '401 Invalid authentication credentials|Please run /login'; then
+            auth_failed=1
+        fi
+    fi
+fi
+
+if [[ $auth_failed -eq 1 ]]; then
+    # Respect the SAME cooldown mark as the restart path so a persistent auth
+    # failure alerts at most once per window instead of every tick.
+    if [[ -f "$LAST_RESTART_MARK" ]]; then
+        last=$(stat -c %Y "$LAST_RESTART_MARK" 2>/dev/null || echo 0)
+        now=$(date +%s)
+        if (( now - last < COOLDOWN_SECONDS )); then
+            log "AUTH 401 ($reason) — in cooldown, last alert $((now-last))s ago; not re-alerting"
+            exit 0
+        fi
+    fi
+    log "AUTH 401 detected for ${SERVICE} — restart cannot fix; alerting operator"
+    mkdir -p "$(dirname "$LAST_RESTART_MARK")"
+    touch "$LAST_RESTART_MARK"
+    # Direct curl alert (bypasses the broken plugin). Token read at runtime,
+    # used only in the HTTPS URL, unset immediately after — SPEC-008.
+    TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+    if [[ -n "${TOKEN:-}" ]]; then
+        curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            -d chat_id="${JORIS_TG_USER_ID}" \
+            -d text="telegram-watchdog: ${SERVICE} AUTH 401 — agent needs re-auth (claude login / refresh token). A restart won't help; NOT restarting. Detected at $(ts)." \
+            > /dev/null
+    fi
+    unset TOKEN
+    # Do NOT restart — a restart would loop pointlessly against bad creds.
+    exit 1
+fi
+
+# ─── Cooldown gate ─────────────────────────────────────────────────────────
+# Don't restart more than once per cooldown window. If we're in cooldown,
+# log + exit cleanly so the timer keeps firing on next tick.
+if [[ -f "$LAST_RESTART_MARK" ]]; then
+    last=$(stat -c %Y "$LAST_RESTART_MARK" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    if (( now - last < COOLDOWN_SECONDS )); then
+        log "broken ($reason) — but in cooldown, last restart $((now-last))s ago"
+        exit 0
+    fi
+fi
+
+# ─── Recovery ──────────────────────────────────────────────────────────────
+# Use stop → (settle) → rm stale bot.pid → start, NOT `systemctl restart`.
+# Why: a bare `restart` leaves a ZOMBIE poller behind — the old bun child can
+# survive the restart, hold the getUpdates slot, and never re-write bot.pid, so
+# the agent comes back "active" but still deaf to Telegram (this was the exact
+# state the 2026-05-31 outage was only cleared by a full stop→start). A clean
+# stop tears the whole cgroup down (killing the zombie bun), the sleep lets
+# systemd reap it, we remove the stale bot.pid so the next health check can't
+# be fooled by a leftover file, then start fresh. (FIX-4a / SPEC-021.)
+# Recovery relaunches the agent RESUMING its prior session (--continue
+# --fork-session) so the auto-restart doesn't wipe context (Joris directive
+# 2026-06-01). Mechanism: install a TRANSIENT systemd drop-in that overrides
+# ExecStart to add the resume flags, daemon-reload, stop→start, then REMOVE the
+# drop-in so a normal (non-watchdog) boot stays canonical/fresh — important
+# because a truly fresh boot has no prior session to --continue.
+#
+# --fork-session mints a new session id on resume so the recovered process never
+# races the old session file. SECURITY (Codex P1 hardening): we do NOT write the
+# drop-in via raw `sudo tee` (arbitrary content = root-escalation vector). We
+# call a ROOT-OWNED helper that writes FIXED content + validates the service name
+# against an allowlist + does its own daemon-reload. The caller (this script,
+# running as `claude`) controls no byte of the resulting unit override.
+log "broken: $reason — stop→start with --continue --fork-session (resume, keep context)"
+mkdir -p "$(dirname "$LAST_RESTART_MARK")"
+touch "$LAST_RESTART_MARK"
+
+# Install the transient resume drop-in via the root-owned helper (fixed content).
+sudo /usr/local/bin/bubble-watchdog-resume-dropin install "$SERVICE"
+
+sudo /usr/bin/systemctl stop "$SERVICE"
+# Give systemd time to tear down the cgroup and reap the bun child(ren).
+sleep 3
+rm -f "$BOT_PID_FILE"
+sudo /usr/bin/systemctl start "$SERVICE"
+
+# Remove the transient resume drop-in so the NEXT (normal) boot is canonical
+# again. The helper rm's the file + daemon-reloads. The already-started process
+# keeps running with the resume flags it launched with — removing the file does
+# not affect the live process.
+sudo /usr/local/bin/bubble-watchdog-resume-dropin remove "$SERVICE"
+
+# Wait for ExecStartPre + claude boot + plugin spawn.
+sleep 15
+
+# Re-verify signals 1-2 (the cheap ones — bot.pid present + alive PID)
+if [[ -f "$BOT_PID_FILE" ]] && kill -0 "$(cat "$BOT_PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    log "recovery confirmed: bot.pid present after restart"
+    exit 0
+fi
+
+# Still broken — alert via direct curl to Telegram (bypassing broken plugin).
+log "recovery FAILED — alerting via direct curl"
+TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
+if [[ -n "${TOKEN:-}" ]]; then
+    curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+        -d chat_id="${JORIS_TG_USER_ID}" \
+        -d text="telegram-watchdog: ${SERVICE} plugin broken (${reason}). Auto-restart at $(ts) didn't recover. Manual investigation needed." \
+        > /dev/null
+fi
+unset TOKEN
+exit 1

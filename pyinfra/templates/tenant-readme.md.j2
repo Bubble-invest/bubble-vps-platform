@@ -1,0 +1,23 @@
+# {{ display_name }} ({{ tenant_name }})
+
+**Type:** {{ tenant_type }}
+**Provisioned:** {{ created_at }} by {{ provisioned_by }}
+**Status:** scaffold (not yet deployed)
+
+## Contract details
+
+(Fill in: signed-on date, plan tier, pricing, SLA, primary contact, billing contact)
+
+## Onboarding checklist
+
+- [ ] Hetzner box provisioned (Step 7b)
+- [ ] All secrets pasted via operator-set-secret.sh
+- [ ] Persona CLAUDE.md filled in
+- [ ] First deploy successful (`pyinfra deploy --tenant={{ tenant_name }}`)
+- [ ] Smoke test: Telegram message → reply
+- [ ] Tailscale device visible in admin console
+- [ ] Phone-home heartbeat appearing in central dashboard
+
+## Notes
+
+(Internal team notes about this tenant)

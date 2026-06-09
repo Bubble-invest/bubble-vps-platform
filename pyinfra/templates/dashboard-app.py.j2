@@ -1,0 +1,474 @@
+#!/usr/bin/env python3
+"""Bubble VPS central dashboard (SPEC-015, Task C).
+
+Single-file stdlib HTTP server. NO Flask, NO requests, NO jinja2 at runtime
+(this file IS the jinja2-rendered output; the templates were evaluated at
+deploy time by pyinfra). Pure stdlib so a fresh Ubuntu box has everything
+already.
+
+Endpoints:
+    POST /heartbeat   — verify Bearer token, validate JSON shape,
+                        insert row in SQLite, return 200.
+    GET  /            — render HTML table: latest heartbeat per tenant.
+    GET  /tenant/<n>  — render HTML timeline of last 24h for that tenant.
+    GET  /healthz     — return 200 ok (for monitoring).
+
+Storage: SQLite at $DB_PATH (defaults to /var/lib/bubble-dashboard/heartbeats.db).
+
+Auth: PHONEHOME_TOKEN read at startup from $ENV_FILE (the same tmpfs env
+file used by the agent). v1 single-tenant: one token, both sides know.
+Multi-tenant later: per-tenant token map.
+
+Bind: $BIND_ADDR ($BIND_PORT) — set via systemd EnvironmentFile from
+`tailscale ip -4`. Listens ONLY on the tailnet interface, not 0.0.0.0.
+Defense in depth: cannot be reached from public internet even if UFW
+were misconfigured.
+
+SPEC-008 hard rule:
+    PHONEHOME_TOKEN is loaded once at startup, kept in process memory.
+    Never logged. Never echoed to stdout/stderr. The /heartbeat handler
+    compares the Bearer header value against the in-memory token using
+    hmac.compare_digest (constant-time) so timing attacks can't probe.
+"""
+from __future__ import annotations
+
+import hmac
+import html
+import json
+import os
+import sqlite3
+import sys
+import threading
+from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Render-time constants (jinja2 substituted at deploy):
+DASHBOARD_TENANT_NAME = "{{ tenant_name }}"   # the host tenant (we are #1)
+SCHEMA_VERSION = 1                            # heartbeat payload schema
+MAX_BODY_BYTES = 64 * 1024                    # 64 KiB cap on POST bodies
+
+DB_PATH = os.environ.get("DB_PATH", "/var/lib/bubble-dashboard/heartbeats.db")
+ENV_FILE = os.environ.get("ENV_FILE", "{{ decrypted_runtime_path }}")
+BIND_ADDR = os.environ.get("BIND_ADDR", "127.0.0.1")
+BIND_PORT = int(os.environ.get("BIND_PORT", "3848"))
+
+
+# ─── Storage ──────────────────────────────────────────────────────────────
+# CREATE TABLE / INDEX statements live here as a single block so the static
+# test (test_dashboard_db_schema) can grep them out byte-for-byte.
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS heartbeats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_name TEXT NOT NULL,
+    ts_utc TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_ts ON heartbeats(tenant_name, ts_utc DESC);
+"""
+
+# Single-writer + many-reader: SQLite is fine here, the dashboard sees a
+# heartbeat every 5 min per tenant and a few page views per day.
+_DB_LOCK = threading.Lock()
+
+
+def db_init() -> None:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.executescript(SCHEMA_SQL)
+        conn.commit()
+
+
+def db_insert_heartbeat(tenant_name: str, ts_utc: str, payload_json: str) -> None:
+    with _DB_LOCK:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO heartbeats(tenant_name, ts_utc, payload_json) "
+                "VALUES (?, ?, ?)",
+                (tenant_name, ts_utc, payload_json),
+            )
+            conn.commit()
+
+
+def db_latest_per_tenant() -> list[dict]:
+    """Return one row per tenant: the most recent heartbeat."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "SELECT tenant_name, MAX(ts_utc) AS ts_utc, payload_json "
+            "FROM heartbeats GROUP BY tenant_name ORDER BY tenant_name"
+        )
+        out: list[dict] = []
+        for tenant_name, ts_utc, payload_json in cur.fetchall():
+            try:
+                payload = json.loads(payload_json)
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            out.append({
+                "tenant_name": tenant_name,
+                "ts_utc": ts_utc,
+                "payload": payload,
+            })
+        return out
+
+
+def db_tenant_timeline(tenant_name: str, hours: int = 24) -> list[dict]:
+    """Return all heartbeats for a tenant within the last `hours`, newest first."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute(
+            "SELECT ts_utc, payload_json FROM heartbeats "
+            "WHERE tenant_name = ? AND ts_utc >= ? "
+            "ORDER BY ts_utc DESC LIMIT 500",
+            (tenant_name, cutoff),
+        )
+        out: list[dict] = []
+        for ts_utc, payload_json in cur.fetchall():
+            try:
+                payload = json.loads(payload_json)
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+            out.append({"ts_utc": ts_utc, "payload": payload})
+        return out
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────
+def load_phone_home_token() -> str:
+    """Read PHONEHOME_TOKEN from the runtime env file.
+
+    We deliberately do NOT crash if the token is missing; instead the
+    /heartbeat handler will reject all POSTs with 503 (not 401) to make
+    the failure mode obvious in dashboard logs. Empty string also
+    causes hmac.compare_digest to always return False against any non-empty
+    incoming token.
+    """
+    try:
+        with open(ENV_FILE, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("PHONEHOME_TOKEN="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+# Loaded once at startup. The systemd unit re-runs the dashboard process
+# (Restart=on-failure) if it crashes, which re-reads. To pick up a token
+# rotation operators do `systemctl restart bubble-dashboard.service`.
+PHONE_HOME_TOKEN: str = ""
+
+
+def verify_bearer_token(auth_header: str | None) -> bool:
+    """Constant-time compare of `Authorization: Bearer <token>` against
+    PHONE_HOME_TOKEN. Returns False on missing/malformed header.
+    """
+    if not PHONE_HOME_TOKEN:
+        # No token loaded yet — refuse all requests.
+        return False
+    if not auth_header:
+        return False
+    parts = auth_header.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return False
+    presented = parts[1].strip()
+    if not presented:
+        return False
+    return hmac.compare_digest(presented, PHONE_HOME_TOKEN)
+
+
+# ─── HTML rendering (no jinja at runtime — f-strings only) ────────────────
+_BASE_CSS = """
+body { font-family: -apple-system, system-ui, sans-serif; margin: 2em; color: #222; }
+h1 { margin-bottom: 0.2em; } h2 { margin-top: 1.5em; }
+table { border-collapse: collapse; margin-top: 1em; }
+th, td { padding: 0.4em 0.8em; border-bottom: 1px solid #ddd; text-align: left; }
+th { background: #f5f5f5; font-weight: 600; }
+.ok { color: #1a7a1a; } .warn { color: #b07000; } .bad { color: #b01010; }
+.muted { color: #888; font-size: 0.9em; }
+a { color: #0058a8; text-decoration: none; } a:hover { text-decoration: underline; }
+"""
+
+
+def _render_page(title: str, body: str) -> str:
+    return (
+        "<!doctype html><html><head>"
+        f"<meta charset=\"utf-8\"><title>{html.escape(title)}</title>"
+        f"<style>{_BASE_CSS}</style>"
+        "</head><body>"
+        f"{body}"
+        "</body></html>"
+    )
+
+
+def _bool_cell(val) -> str:
+    if val is True:
+        return '<span class="ok">yes</span>'
+    if val is False:
+        return '<span class="bad">no</span>'
+    return '<span class="muted">?</span>'
+
+
+def _seconds_to_human(s) -> str:
+    if not isinstance(s, (int, float)) or s < 0:
+        return "?"
+    s = int(s)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        return f"{s // 3600}h{(s % 3600) // 60}m"
+    return f"{s // 86400}d{(s % 86400) // 3600}h"
+
+
+def _staleness(ts_utc: str) -> tuple[str, str]:
+    """Return (human age, css class) for a heartbeat timestamp."""
+    try:
+        ts = datetime.strptime(ts_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return ("?", "muted")
+    age_s = int((datetime.now(timezone.utc) - ts).total_seconds())
+    cls = "ok" if age_s < 600 else ("warn" if age_s < 1800 else "bad")
+    return (_seconds_to_human(age_s) + " ago", cls)
+
+
+def render_index() -> str:
+    rows = db_latest_per_tenant()
+    if not rows:
+        body = (
+            "<h1>Bubble VPS dashboard</h1>"
+            "<p class=\"muted\">No heartbeats received yet.</p>"
+        )
+        return _render_page("Bubble VPS dashboard", body)
+
+    lines = [
+        "<h1>Bubble VPS dashboard</h1>",
+        "<p class=\"muted\">Latest heartbeat per tenant. "
+        "Click a tenant for the 24h timeline.</p>",
+        "<table><thead><tr>"
+        "<th>Tenant</th><th>Heartbeat</th><th>Agent</th><th>Telegram</th>"
+        "<th>Tailscale</th><th>Disk</th><th>Mem</th><th>Claude</th>"
+        "</tr></thead><tbody>",
+    ]
+    for row in rows:
+        p = row["payload"]
+        host_p = p.get("host", {}) if isinstance(p, dict) else {}
+        agent_p = p.get("agent", {}) if isinstance(p, dict) else {}
+        tg_p = p.get("telegram", {}) if isinstance(p, dict) else {}
+        ts_p = p.get("tailscale", {}) if isinstance(p, dict) else {}
+        cc_p = p.get("claude_code", {}) if isinstance(p, dict) else {}
+        age_text, age_cls = _staleness(row["ts_utc"])
+        lines.append(
+            "<tr>"
+            f"<td><a href=\"/tenant/{html.escape(row['tenant_name'])}\">"
+            f"{html.escape(row['tenant_name'])}</a></td>"
+            f"<td><span class=\"{age_cls}\">{html.escape(age_text)}</span></td>"
+            f"<td>{_bool_cell(agent_p.get('is_active'))} "
+            f"({_seconds_to_human(agent_p.get('uptime_seconds', 0))}, "
+            f"r24h={agent_p.get('restarts_24h', '?')})</td>"
+            f"<td>{_bool_cell(tg_p.get('bot_pid_alive'))}</td>"
+            f"<td>{_bool_cell(ts_p.get('online'))} "
+            f"{html.escape(str(ts_p.get('self_ip') or ''))}</td>"
+            f"<td>{html.escape(str(host_p.get('disk_pct_used', '?')))}%</td>"
+            f"<td>{html.escape(str(host_p.get('memory_pct_used', '?')))}%</td>"
+            f"<td>{html.escape(str(cc_p.get('version_installed') or '?'))}</td>"
+            "</tr>"
+        )
+    lines.append("</tbody></table>")
+    return _render_page("Bubble VPS dashboard", "\n".join(lines))
+
+
+def render_tenant_timeline(tenant_name: str) -> str:
+    rows = db_tenant_timeline(tenant_name, hours=24)
+    body_parts = [
+        f"<h1>{html.escape(tenant_name)} — 24h timeline</h1>",
+        "<p><a href=\"/\">&larr; back to dashboard</a></p>",
+    ]
+    if not rows:
+        body_parts.append(
+            "<p class=\"muted\">No heartbeats in the last 24h.</p>"
+        )
+        return _render_page(f"{tenant_name} — timeline", "\n".join(body_parts))
+
+    body_parts.append(
+        "<table><thead><tr>"
+        "<th>Time (UTC)</th><th>Agent</th><th>Telegram</th>"
+        "<th>Disk</th><th>Mem</th><th>Load</th>"
+        "</tr></thead><tbody>"
+    )
+    for row in rows:
+        p = row["payload"]
+        host_p = p.get("host", {}) if isinstance(p, dict) else {}
+        agent_p = p.get("agent", {}) if isinstance(p, dict) else {}
+        tg_p = p.get("telegram", {}) if isinstance(p, dict) else {}
+        body_parts.append(
+            "<tr>"
+            f"<td>{html.escape(str(row['ts_utc']))}</td>"
+            f"<td>{_bool_cell(agent_p.get('is_active'))}</td>"
+            f"<td>{_bool_cell(tg_p.get('bot_pid_alive'))}</td>"
+            f"<td>{html.escape(str(host_p.get('disk_pct_used', '?')))}%</td>"
+            f"<td>{html.escape(str(host_p.get('memory_pct_used', '?')))}%</td>"
+            f"<td>{html.escape(str(host_p.get('load_avg_1m', '?')))}</td>"
+            "</tr>"
+        )
+    body_parts.append("</tbody></table>")
+    return _render_page(f"{tenant_name} — timeline", "\n".join(body_parts))
+
+
+# ─── HTTP handler ─────────────────────────────────────────────────────────
+class DashboardHandler(BaseHTTPRequestHandler):
+    server_version = "BubbleDashboard/1.0"
+
+    # Override the default request logger: we want a single concise line
+    # per request, NEVER the request body (which contains heartbeat data).
+    # Also NEVER the Authorization header (would leak the token).
+    def log_message(self, fmt: str, *args) -> None:  # noqa: A003
+        sys.stdout.write(
+            f"[{self.log_date_time_string()}] {self.address_string()} "
+            f"{fmt % args}\n"
+        )
+        sys.stdout.flush()
+
+    # ---- Helpers --------------------------------------------------------
+    def _send_text(self, status: int, body: str, content_type: str = "text/plain") -> None:
+        body_bytes = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body_bytes)
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        self._send_text(status, json.dumps(payload), content_type="application/json")
+
+    # ---- Routes ---------------------------------------------------------
+    def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler API)
+        path = self.path.split("?", 1)[0]
+        if path == "/healthz":
+            self._send_text(HTTPStatus.OK, "ok")
+            return
+        if path == "/":
+            try:
+                html_body = render_index()
+            except Exception as exc:  # noqa: BLE001
+                self.log_message("render index error: %s", type(exc).__name__)
+                self._send_text(HTTPStatus.INTERNAL_SERVER_ERROR, "render error")
+                return
+            self._send_text(HTTPStatus.OK, html_body, content_type="text/html")
+            return
+        if path.startswith("/tenant/"):
+            tenant_name = path[len("/tenant/"):].strip("/")
+            # Defensive: tenant names per SPEC-001 are [a-z][a-z0-9-]*
+            if not tenant_name or not all(
+                c.islower() or c.isdigit() or c == "-" for c in tenant_name
+            ) or not tenant_name[0].isalpha():
+                self._send_text(HTTPStatus.BAD_REQUEST, "invalid tenant name")
+                return
+            try:
+                html_body = render_tenant_timeline(tenant_name)
+            except Exception as exc:  # noqa: BLE001
+                self.log_message("render timeline error: %s", type(exc).__name__)
+                self._send_text(HTTPStatus.INTERNAL_SERVER_ERROR, "render error")
+                return
+            self._send_text(HTTPStatus.OK, html_body, content_type="text/html")
+            return
+        self._send_text(HTTPStatus.NOT_FOUND, "not found")
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0]
+        if path != "/heartbeat":
+            self._send_text(HTTPStatus.NOT_FOUND, "not found")
+            return
+
+        # Bearer auth (constant-time compare).
+        auth = self.headers.get("Authorization")
+        if not verify_bearer_token(auth):
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "missing or invalid Bearer token"},
+            )
+            return
+
+        # Body length cap.
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad content-length"})
+            return
+        if content_length <= 0 or content_length > MAX_BODY_BYTES:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad body size"})
+            return
+
+        body = self.rfile.read(content_length)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
+            return
+
+        # Minimal shape validation. Per SPEC-015 telemetry contract.
+        if not isinstance(payload, dict):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "payload must be object"})
+            return
+        sv = payload.get("schema_version")
+        if sv != SCHEMA_VERSION:
+            self._send_json(
+                HTTPStatus.BAD_REQUEST,
+                {"error": f"unsupported schema_version (want {SCHEMA_VERSION}, got {sv})"},
+            )
+            return
+        tenant_name = payload.get("tenant_name")
+        ts_utc = payload.get("ts_utc")
+        if not isinstance(tenant_name, str) or not tenant_name:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "tenant_name required"})
+            return
+        if not isinstance(ts_utc, str) or not ts_utc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "ts_utc required"})
+            return
+
+        try:
+            db_insert_heartbeat(tenant_name, ts_utc, json.dumps(payload))
+        except sqlite3.Error as exc:
+            self.log_message("db insert error: %s", type(exc).__name__)
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "db error"})
+            return
+
+        # Log the FACT of receipt — tenant + size + ts. NEVER the payload
+        # body itself (per SPEC-008 hard rule).
+        self.log_message(
+            "heartbeat tenant=%s ts=%s bytes=%d", tenant_name, ts_utc, content_length
+        )
+        self._send_json(HTTPStatus.OK, {"ok": True})
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────
+def main() -> int:
+    global PHONE_HOME_TOKEN
+    db_init()
+    PHONE_HOME_TOKEN = load_phone_home_token()
+    if not PHONE_HOME_TOKEN:
+        sys.stdout.write(
+            "WARN: PHONEHOME_TOKEN not present in env file; "
+            "all /heartbeat POSTs will return 401 until restart with token loaded.\n"
+        )
+        sys.stdout.flush()
+
+    server = ThreadingHTTPServer((BIND_ADDR, BIND_PORT), DashboardHandler)
+    sys.stdout.write(
+        f"bubble-dashboard listening on {BIND_ADDR}:{BIND_PORT} "
+        f"(db={DB_PATH}, host_tenant={DASHBOARD_TENANT_NAME})\n"
+    )
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        sys.stdout.write("shutting down\n")
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

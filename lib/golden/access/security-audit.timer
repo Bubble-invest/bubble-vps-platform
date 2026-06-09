@@ -1,0 +1,12 @@
+# /etc/systemd/system/security-audit.timer
+# Managed by bubble-vps-platform (SPEC-014). Do not edit by hand.
+[Unit]
+Description=Bubble VPS security audit (daily 09:00 UTC)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 UTC
+Persistent=true
+Unit=security-audit.service
+
+[Install]
+WantedBy=timers.target
