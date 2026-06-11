@@ -302,31 +302,125 @@ the journal. NEVER mask the failure with `Restart=always`.
 
 ---
 
+## Agent startup failures (debugging the verification gate)
+
+Symptom: a deploy **aborts at the agent verification gate** (`pyinfra` stops at
+`tasks/agent/_verify.py` with a non-zero `server.shell` op), OR a freshly
+deployed `claude-agent-<persona>.service` never reaches a healthy state.
+
+The gate (`pyinfra/tasks/agent/_verify.py`) runs SIX checks PER concierge AFTER
+the unit is started but BEFORE `_cleanup_legacy` removes the plaintext fallback
+— so a failed gate is non-destructive (the rollback path stays intact). When the
+gate aborts, pyinfra prints which named op failed; reproduce it by hand on the
+box to find the root cause. For a primary concierge (e.g. morty) the runtime env
+file is `/run/claude-agent/env`; for additional concierges it is
+`/run/claude-agent-<name>/env`.
+
+```bash
+ssh <tenant>-vps
+SVC=claude-agent-morty.service          # adjust <persona>
+ENV=/run/claude-agent/env               # /run/claude-agent-<name>/env for non-primary
+
+# Gate check 1 — service ACTIVE
+sudo systemctl is-active --quiet "$SVC" && echo "1 OK: active" || echo "1 FAIL: not active"
+
+# Gate check 2 — service ENABLED (survives reboot)
+sudo systemctl is-enabled --quiet "$SVC" && echo "2 OK: enabled" || echo "2 FAIL: not enabled"
+
+# Gate check 3 — decrypted runtime env present, mode 0400, owned by claude
+sudo test -f "$ENV" && echo "3a OK: env present" || echo "3a FAIL: env missing (sops decrypt ExecStartPre failed)"
+sudo sh -c "[ \"\$(stat -c %a $ENV)\" = 400 ]" && echo "3b OK: mode 0400" || echo "3b FAIL: wrong mode"
+sudo sh -c "[ \"\$(stat -c %U $ENV)\" = claude ]" && echo "3c OK: owned by claude" || echo "3c FAIL: wrong owner"
+
+# Gate check 4 — unit DECLARES EnvironmentFile=<env>
+sudo systemctl show "$SVC" --property=EnvironmentFiles | grep -q "$ENV" \
+    && echo "4 OK: EnvironmentFile declared" || echo "4 FAIL: unit missing EnvironmentFile"
+
+# Gate check 5 — expected env-var NAMES present in the decrypted env file
+#   (NAMES only — never values; the file is mode 0400 so this needs sudo).
+#   Primary expects CLAUDE_CODE_OAUTH_TOKEN + TELEGRAM_BOT_TOKEN; a non-primary
+#   concierge's own <REF> is REMAPPED to TELEGRAM_BOT_TOKEN in ITS env file.
+for k in CLAUDE_CODE_OAUTH_TOKEN TELEGRAM_BOT_TOKEN; do
+    sudo grep -q "^$k=" "$ENV" && echo "5 OK: $k present" || echo "5 FAIL: $k missing from env"
+done
+
+# Gate check 6 — no error-priority journal lines since startup
+sudo journalctl -u "$SVC" --since "30 seconds ago" --priority=err --no-pager | tail -20
+# (empty output = check 6 passes)
+```
+
+Interpreting failures:
+
+| Failing check | Most likely cause | Where to look |
+|---------------|-------------------|---------------|
+| 1 (not active) / 6 (errors) | ExecStart died — bun PATH, model alias, quoting | `sudo journalctl -u "$SVC" -n 200` → see "Auto-restart loop" |
+| 3a (env missing) | the `sops --decrypt` ExecStartPre failed | "Deploy fails at sops verify" section above |
+| 3b/3c (mode/owner) | the chown/chmod ExecStartPre chain regressed | `sudo systemctl cat "$SVC" \| grep ExecStartPre` |
+| 4 (no EnvironmentFile) | unit-template regression | re-render: compare `sudo systemctl cat "$SVC"` to the golden unit |
+| 5 (var missing) | required key absent from `secrets.sops.env` | "Deploy fails at sops verify" → `operator-set-secret.sh` |
+
+The gate NEVER echoes a credential value. If you must inspect the env layout,
+`sudo cut -d= -f1 "$ENV"` prints only the KEY NAMES.
+
+---
+
 ## Secret needs rotation
 
 Routine: e.g. an OpenRouter key or Telegram bot token has been suspected
 leaked or hit its rotation deadline.
 
+**Safe rotation discipline: re-encrypt → re-deploy → verify.** Never edit the
+ciphertext by hand, never SSH a new value onto the box directly, and always
+confirm the gate passed after the redeploy. The three phases:
+
 ```bash
-# 1. Operator Mac: update the encrypted secrets file via the GUI prompt
+# ─── Phase 1: re-encrypt (operator Mac) ────────────────────────────────────
+# 1. Update the encrypted secrets file via the GUI prompt. This re-encrypts
+#    the WHOLE secrets.sops.env to the tenant's recipients (operator master +
+#    box pubkey) with the new value substituted — the value never echoes.
 ./scripts/operator-set-secret.sh --tenant=<name> --key=<KEY_NAME>
-# (script opens a native password dialog; value never echoes)
+
+# 1b. Confirm the new ciphertext still decrypts for the operator (sanity — does
+#     NOT print plaintext, only exit code) and the key is present:
+cd ../bubble-vps-data
+SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+    sops --decrypt tenants/<name>/secrets.sops.env | cut -d= -f1 | grep -qx '<KEY_NAME>' \
+    && echo "re-encrypt OK: <KEY_NAME> present" || echo "FAIL: key missing after re-encrypt"
 
 # 2. Commit the change
-cd ../bubble-vps-data
 git commit -am "Rotate <KEY_NAME> for <name>"
 cd -
 
-# 3. Redeploy — the agent service will be restarted because /etc/bubble/secrets.sops.env changed
+# ─── Phase 2: re-deploy (operator Mac) ─────────────────────────────────────
+# 3. Redeploy. files.put on /etc/bubble/secrets.sops.env detects the changed
+#    hash and triggers `systemctl restart claude-agent-<persona>.service`
+#    (SPEC-012). The agent verification gate (see "Agent startup failures"
+#    above) then re-runs — a green deploy already proves the new secret loaded.
 ./scripts/deploy.sh --tenant=<name>
 
-# 4. Smoke test
-#    Telegram bot still answers (if you rotated TELEGRAM_BOT_TOKEN, you may
-#    need to restart the bot's polling first)
-#    Tailscale still up (if you rotated TAILSCALE_AUTHKEY — note: the box
-#    only re-auths on `tailscale up`, which only runs if not already
-#    authenticated; rotation matters only for new boxes)
+# ─── Phase 3: verify on the box ────────────────────────────────────────────
+# 4. Confirm the new ciphertext decrypted into the runtime env (NAMES only):
+ssh <name>-vps 'sudo cut -d= -f1 /run/claude-agent/env | grep -x <KEY_NAME> \
+    && echo "verify OK: <KEY_NAME> in runtime env" || echo "FAIL: key absent"'
+
+# 5. Confirm the service came back healthy after its restart:
+ssh <name>-vps 'sudo systemctl is-active --quiet claude-agent-<persona>.service \
+    && echo active || echo FAIL'
+
+# 6. Functional smoke test (per rotated key):
+#    - TELEGRAM_BOT_TOKEN → DM the bot, expect a reply. If the poller wedged on
+#      the old token, restart it: ssh <name>-vps 'sudo systemctl restart claude-agent-<persona>.service'
+#    - TAILSCALE_AUTHKEY → the box only re-auths on `tailscale up`, which only
+#      runs when not already authenticated; rotating the authkey matters for
+#      NEW boxes, not an already-joined node.
+#    - PHONEHOME_TOKEN → confirm the next heartbeat is accepted (dashboard
+#      shows a fresh timestamp within `phone_home.interval_minutes`).
 ```
+
+If Phase 3 step 4 shows the key ABSENT from the runtime env, the redeploy did
+not pick up the change — most often because the commit in Phase 1 was skipped or
+the deploy targeted the wrong tenant. Re-run Phase 2 and recheck; the plaintext
+fallback is never touched, so this is safe to retry.
 
 The "restart on secret change" hook is per [SPEC-012](../specs/SPEC-012-secrets-restart-on-change.md)
 — `files.put` on `/etc/bubble/secrets.sops.env` triggers
@@ -345,3 +439,111 @@ done
 
 Future: `scripts/rotate-secrets.sh --secret=<KEY> --new=<value> --all` per
 the end-state vision (not in Phase 1).
+
+---
+
+## Sandbox violations (AppArmor denials, bwrap failures)
+
+The OS sandbox (Layer B — anti prompt-injection) is installed by
+`pyinfra/tasks/hardening/_sandbox.py`, which delegates to
+`bubble-ops-loop/scripts/install-sandbox.sh`. It installs **bwrap**
+(bubblewrap), **socat**, an **AppArmor** profile, and
+`@anthropic-ai/sandbox-runtime`, and merges a `sandbox` block into
+`/etc/claude-code/managed-settings.json`. Symptoms of trouble: the agent's Bash
+tool reports `Permission denied` / `Operation not permitted` on paths that
+should be allowed, child tools fail to spawn, or the journal shows `apparmor`
+`DENIED` lines.
+
+### Triage: is the sandbox even engaged?
+
+```bash
+ssh <tenant>-vps
+
+# 1. Sandbox runtime + jail tooling installed?
+which bwrap socat                         # both must resolve
+bwrap --version                           # sanity: bwrap runs at all
+
+# 2. managed-settings declares the sandbox block?
+sudo cat /etc/claude-code/managed-settings.json | python3 -m json.tool | grep -iA3 sandbox
+
+# 3. AppArmor enabled + the claude/bwrap profile loaded?
+sudo aa-status | grep -iE "profiles are loaded|profiles are in enforce"
+sudo aa-status | grep -iE "claude|bwrap|sandbox"
+```
+
+If `aa-status` shows the profile in **complain** mode (not **enforce**), denials
+are LOGGED but not blocked — useful while diagnosing, but it is not the
+production posture.
+
+### Reading AppArmor denials
+
+AppArmor logs every block to the kernel audit log. Each `DENIED` line names the
+profile, the operation, and the exact path/capability that was refused:
+
+```bash
+# Recent denials (kernel audit via journald)
+sudo journalctl -k --since "30 min ago" | grep -i 'apparmor="DENIED"'
+
+# Or straight from the audit log if auditd is present
+sudo grep 'apparmor="DENIED"' /var/log/audit/audit.log 2>/dev/null | tail -30
+
+# Or dmesg for the most recent
+sudo dmesg | grep -i 'apparmor.*DENIED' | tail -30
+```
+
+A denial line looks like:
+`apparmor="DENIED" operation="open" profile="..." name="/path/it/wanted" ...`
+— the `name=` is the resource the agent was refused, the `operation=` is what it
+tried (open/exec/mount/etc). That tells you whether the profile is too tight
+(legitimate path blocked → the profile needs the path added upstream in
+`install-sandbox.sh`) or whether the agent genuinely tried something it should
+not (prompt-injection working as intended — do NOT loosen the profile; this is
+the layer doing its job).
+
+### bwrap (bubblewrap) failures
+
+bwrap needs unprivileged user namespaces. If the jail fails to construct, the
+agent's sandboxed Bash fails before the command even runs:
+
+```bash
+# 1. Unprivileged user namespaces enabled? (must print 1)
+sudo sysctl kernel.unprivileged_userns_clone 2>/dev/null
+cat /proc/sys/user/max_user_namespaces        # must be > 0
+
+# 2. Reproduce a minimal bwrap jail as the claude user
+sudo -u claude bwrap --ro-bind / / --dev /dev --proc /proc echo "bwrap OK"
+#    "bwrap OK"             → jail constructs fine; the issue is profile/policy
+#    "Creating new namespace failed: Operation not permitted"
+#                           → userns disabled at the kernel/sysctl level
+
+# 3. Inspect what the sandbox runtime is invoking
+sudo -u claude pgrep -af bwrap                 # see the live jail args
+```
+
+Common bwrap root causes:
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Creating new namespace failed: Operation not permitted` | unprivileged userns disabled | `sudo sysctl -w kernel.unprivileged_userns_clone=1` (persist in `/etc/sysctl.d/`); verify the host/provider allows userns |
+| `bwrap: ... No such file or directory` on a `--bind` path | a path the runtime expected is absent | re-run the sandbox install (idempotent): `sudo bash /home/claude/bubble-ops-loop/scripts/install-sandbox.sh` |
+| Bash works but writes are refused | AppArmor profile (not bwrap) is enforcing | read the `DENIED` line — see "Reading AppArmor denials" above |
+
+### Re-applying the sandbox
+
+The install is idempotent and safe to re-run. Re-apply via pyinfra (preferred —
+keeps it in the managed flow) or directly on the box:
+
+```bash
+# Preferred: through the hardening task (re-runs _sandbox.apply())
+TENANT=<name> ./.venv/bin/pyinfra inventory.py pyinfra/tasks/hardening/linux.py
+
+# Direct (on the box) — the same script pyinfra delegates to
+ssh <tenant>-vps 'sudo bash /home/claude/bubble-ops-loop/scripts/install-sandbox.sh'
+
+# After re-applying, reload AppArmor profiles and re-check status
+ssh <tenant>-vps 'sudo systemctl reload apparmor && sudo aa-status | grep -i enforce'
+```
+
+The morning **security-audit cron** ([SPEC-014](../specs/SPEC-014-cloud-security-cron.md))
+also reports sandbox/AppArmor posture — check its last run if you suspect the
+sandbox silently disengaged overnight.

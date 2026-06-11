@@ -43,7 +43,20 @@ from tasks.access import (  # noqa: E402
 )
 from tasks.agent import deploy as agent  # noqa: E402
 from tasks.hardening import linux as hardening  # noqa: E402
-from tasks.monitoring import dashboard, wiki_compile_alerts  # noqa: E402
+# tasks/monitoring/__init__.py re-exports each submodule's `apply` under a
+# friendly name (dashboard, wiki_compile_alerts, restic_backup, cache_sync,
+# secrets_sweep, transcript_leak_scan). Import the ones we call directly. The
+# bare `monitoring.<fn>()` calls in step 11 below previously referenced an
+# UNBOUND `monitoring` name (NameError at deploy time) — import the functions
+# explicitly here so the call sites resolve, matching dashboard/wiki_compile.
+from tasks.monitoring import (  # noqa: E402
+    cache_sync,
+    dashboard,
+    restic_backup,
+    secrets_sweep,
+    transcript_leak_scan,
+    wiki_compile_alerts,
+)
 from tasks.secrets import deploy as secrets  # noqa: E402
 
 # 1) Apply the Linux hardening profile (idempotent — zero changes against an
@@ -133,13 +146,15 @@ server.shell(
     ],
 )
 
-# 7) Platform monitoring services (idempotent — zero changes against already-installed units).
-monitoring.restic_backup()
-monitoring.cache_sync()
-monitoring.secrets_sweep()
-monitoring.transcript_leak_scan()
+# 11) Platform monitoring services (idempotent — zero changes against
+#     already-installed units). These are the re-exported `apply` functions
+#     imported at the top (NOT a `monitoring` module — there is no such name).
+restic_backup()
+cache_sync()
+secrets_sweep()
+transcript_leak_scan()
 
-# 0) Clone or update bubble-ops-loop (idempotent — git pull if exists, clone if not).
+# 12) Clone or update bubble-ops-loop (idempotent — git pull if exists, clone if not).
 from pyinfra.operations import server as _server
 _LOOP_REPO = "https://github.com/Bubble-invest/bubble-ops-loop.git"
 _LOOP_DIR = "/home/claude/bubble-ops-loop"

@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Built on Claude Code](https://img.shields.io/badge/built%20on-Claude%20Code-orange)](https://claude.ai)
-[![Tests](https://img.shields.io/badge/tests-53%20passed-green)]()
+[![Tests: 399 / 399 passing](https://img.shields.io/badge/tests-399%20passing-green)]()
 
 ---
 
