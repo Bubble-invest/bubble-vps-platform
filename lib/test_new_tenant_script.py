@@ -28,6 +28,31 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "new-tenant.sh"
 DATA_REPO_REAL = REPO_ROOT.parent / "bubble-vps-data"
 SOPS_YAML_REAL = DATA_REPO_REAL / ".sops.yaml"
+TEMPLATES_DIR = REPO_ROOT / "pyinfra" / "templates"
+
+
+def _render_tenant_template(**ctx: str) -> str:
+    """Render pyinfra/templates/tenant.yaml.j2 the SAME way new-tenant.sh does
+    (Jinja2 + StrictUndefined + keep_trailing_newline). No sops needed — this
+    is a pure template-render so it runs everywhere.
+    """
+    from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES_DIR)),
+        undefined=StrictUndefined,
+        keep_trailing_newline=True,
+    )
+    defaults = {
+        "tenant_name": "acme-corp",
+        "tenant_type": "client",
+        "display_name": "Acme Corp",
+        "persona_name": "acme-bot",
+        "created_at": "2026-06-11",
+        "provisioned_by": "lab",
+    }
+    defaults.update(ctx)
+    return env.get_template("tenant.yaml.j2").render(**defaults)
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -326,3 +351,96 @@ def test_script_fails_loudly_when_sops_yaml_missing(tmp_path: Path):
             f"plaintext placeholders found in {secrets_file} after sops failure — "
             f"the bug from 2026-05-09 has regressed!"
         )
+
+
+# ─── tenant.yaml.j2 template shape (SPEC-001 v1.2/v1.3 — C1) ─────────────────
+# These render the scaffold template directly (no sops) and assert it emits the
+# CANONICAL multi-concierge LIST form, parsing cleanly through tenant_loader.
+
+
+def test_template_renders_multi_concierge_list_form():
+    """The scaffold template must emit the v1.2 canonical `agent.concierges`
+    LIST form — NOT the legacy single `agent.persona` object.
+
+    Regression guard for C1: before the v1.3 update the template rendered the
+    pre-v1.2 single-concierge shape (worked only via the back-compat shim), so
+    every freshly-scaffolded tenant started in the wrong (deprecated) UX.
+    """
+    rendered = _render_tenant_template(persona_name="acme-bot")
+
+    # Canonical list form present.
+    assert "concierges:" in rendered, (
+        "template must render the canonical agent.concierges LIST form "
+        "(SPEC-001 v1.2)"
+    )
+    # The first concierge is a list entry (`- name:`) — not an `agent.persona`
+    # mapping. We assert the legacy single form is GONE (setting both is a parse
+    # error, and the legacy form is the deprecated UX).
+    assert "- name: acme-bot" in rendered
+    assert "persona_dir: persona/acme-bot" in rendered
+    # The legacy `persona:` mapping under agent must NOT be emitted (it would
+    # also collide with concierges → parse error in tenant_loader).
+    assert "\n  persona:\n" not in rendered, (
+        "template still emits the legacy agent.persona single-concierge form; "
+        "the v1.3 scaffold must use the concierges list exclusively"
+    )
+
+    # The v1.3 git-backed option is documented (commented out — synced is the
+    # default), so operators discover it without it being active.
+    assert "workspace_repo" in rendered, (
+        "template should document the optional v1.3 git-backed workspace_repo"
+    )
+
+    # Canonical model alias (SPEC-021 inv#1) — never bare "opus" or "default".
+    assert 'model: "opus[1m]"' in rendered
+    assert 'model: "opus"\n' not in rendered
+    assert 'model: "default"' not in rendered
+
+
+def test_template_renders_valid_tenant_yaml_loader_parses(tmp_path: Path):
+    """The rendered scaffold (placeholders filled, like an operator post-Hetzner)
+    parses through tenant_loader as a valid one-element multi-concierge tenant.
+
+    This is the end-to-end C1 assertion: template → valid v1.2 tenant.yaml that
+    `tenant_loader` accepts AND exposes as a `concierges` list. No sops needed.
+    """
+    import sys
+
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from lib.tenant_loader import load_tenant_from_path
+
+    rendered = _render_tenant_template(
+        tenant_name="acme-corp",
+        tenant_type="client",
+        display_name="Acme Corp",
+        persona_name="acme-bot",
+    )
+    # Mimic the operator filling placeholders after Hetzner provisioning +
+    # contact entry (same substitutions as test_script_yaml_passes_loader_validation).
+    rendered = rendered.replace(
+        "ip: PLACEHOLDER_FILL_AFTER_HETZNER_PROVISION", "ip: 1.2.3.4"
+    )
+    rendered = rendered.replace('"PLACEHOLDER_TELEGRAM_USER_ID"', '"1234567"')
+
+    tenant_dir = tmp_path / "tenants" / "acme-corp"
+    persona_dir = tenant_dir / "persona" / "acme-bot"
+    persona_dir.mkdir(parents=True)
+    (persona_dir / "CLAUDE.md").write_text("# acme-bot\n", encoding="utf-8")
+    yaml_path = tenant_dir / "tenant.yaml"
+    yaml_path.write_text(rendered, encoding="utf-8")
+
+    cfg = load_tenant_from_path(yaml_path, expected_name="acme-corp")
+
+    # Parsed as a one-element concierges LIST (the v1.2 canonical shape).
+    assert len(cfg.agent.concierges) == 1
+    concierge = cfg.agent.concierges[0]
+    assert concierge.name == "acme-bot"
+    assert concierge.persona_dir == "persona/acme-bot"
+    assert concierge.llm.model == "opus[1m]"
+    # Synced workspace is the default — git-backed option stays commented out.
+    assert concierge.workspace_repo is None
+    assert concierge.channels.telegram is not None
+    assert concierge.channels.telegram.bot_token_secret_ref == "TELEGRAM_BOT_TOKEN"
+    # Back-compat .persona accessor still resolves to concierges[0].
+    assert cfg.agent.persona.name == "acme-bot"
