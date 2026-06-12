@@ -1433,6 +1433,115 @@ class TestGitBackedConciergeWorkspace:
             "the data-repo persona/"
         )
 
+    def test_git_backed_clone_targets_workdir_and_uses_idempotent_guard(self, tmp_path):
+        """The clone op must (a) create/target the workdir /home/claude/agents/
+        <name> and (b) be wrapped in the idempotent `test -d <dir>/.git ||`-style
+        guard so a re-deploy over an existing clone is a NO-OP (never re-clones).
+
+        C3(a): asserts the workdir is the clone target AND the idempotency guard
+        is present — protects against a regression that drops the guard and makes
+        every deploy try to `git clone` over an existing checkout (which crashes
+        with 'fatal: destination path already exists')."""
+        mod, files_rec, server_rec = _import_persona_with_recorders()
+        _, concierge = self._setup_git_backed(tmp_path)
+        cfg = _FakeCfg(str(tmp_path))
+        mod._apply_one(cfg, concierge, is_primary=False)
+
+        shell_calls = server_rec.calls.get("shell", [])
+        assert shell_calls, "git-backed concierge must emit a clone op"
+        cmd = "\n".join(
+            "\n".join(c.get("commands", [])) for c in shell_calls
+        )
+        # Idempotency guard: a `test -d <workdir>/.git` that short-circuits the
+        # clone when the checkout already exists.
+        assert "test -d /home/claude/agents/claudette/.git" in cmd, (
+            "clone op must guard on `test -d <workdir>/.git` for idempotency"
+        )
+        # The clone target argument is the workdir itself (last arg of git clone).
+        assert "git clone --branch main " in cmd
+        assert cmd.rstrip().endswith("fi"), (
+            "clone op should be a single guarded shell expression ending in `fi`"
+        )
+
+    def test_git_backed_clone_refuses_dangling_symlink(self, tmp_path):
+        """If the workdir path is a DANGLING symlink (target gone), the deploy
+        must HARD-ERROR (exit 1) rather than clone over it — mirrors
+        bubble-ops-loop/scripts/deploy-to-morty.sh.
+
+        C3(a): the destructive-safety branch. Cloning over a dangling symlink
+        would either fail confusingly or (worse) orphan the real data the symlink
+        was meant to point at. The guard must detect `test -L <dir> && ! test -e
+        <dir>` and `exit 1` with a clear message."""
+        mod, files_rec, server_rec = _import_persona_with_recorders()
+        _, concierge = self._setup_git_backed(tmp_path)
+        cfg = _FakeCfg(str(tmp_path))
+        mod._apply_one(cfg, concierge, is_primary=False)
+
+        cmd = "\n".join(
+            "\n".join(c.get("commands", []))
+            for c in server_rec.calls.get("shell", [])
+        )
+        # Dangling-symlink detection: test -L <dir> && ! test -e <dir>.
+        assert "test -L /home/claude/agents/claudette" in cmd
+        assert "! test -e /home/claude/agents/claudette" in cmd
+        # And it must exit non-zero (refuse) on that branch.
+        assert "exit 1" in cmd, (
+            "dangling-symlink branch must `exit 1` to refuse cloning over it"
+        )
+        assert "DANGLING" in cmd.upper(), (
+            "refusal message should name the dangling-symlink condition so the "
+            "operator knows what to fix"
+        )
+
+    def test_git_backed_clone_honors_non_default_branch(self, tmp_path):
+        """workspace_branch (when not 'main') must propagate into the clone's
+        `--branch <branch>` so the deploy checks out the declared branch.
+
+        C3(a): branch propagation. A concierge pinning a non-main branch (e.g. a
+        staging workspace) must get that exact branch cloned."""
+        mod, files_rec, server_rec = _import_persona_with_recorders()
+        persona = tmp_path / "persona" / "claudette"
+        (persona / "agent-memory").mkdir(parents=True)
+        (persona / "CLAUDE.md").write_text("# claudette\n")
+        concierge = _make_concierge(
+            "claudette",
+            "persona/claudette",
+            workspace_repo="https://github.com/vdk888/bubble-claudette-workspace.git",
+            workspace_branch="staging",
+        )
+        cfg = _FakeCfg(str(tmp_path))
+        mod._apply_one(cfg, concierge, is_primary=False)
+
+        cmd = "\n".join(
+            "\n".join(c.get("commands", []))
+            for c in server_rec.calls.get("shell", [])
+        )
+        assert "git clone --branch staging " in cmd, (
+            "clone must pass the declared workspace_branch via --branch"
+        )
+        assert "--branch main" not in cmd, (
+            "non-default branch must NOT be silently replaced by 'main'"
+        )
+
+    def test_git_backed_clone_runs_as_claude_user(self, tmp_path):
+        """The clone-if-absent op must run as the `claude` user (via _sudo +
+        _sudo_user='claude'), not root — the workdir lives under /home/claude and
+        must be owned by claude. C3(a): ownership-correctness guard."""
+        mod, files_rec, server_rec = _import_persona_with_recorders()
+        _, concierge = self._setup_git_backed(tmp_path)
+        cfg = _FakeCfg(str(tmp_path))
+        mod._apply_one(cfg, concierge, is_primary=False)
+
+        shell_calls = server_rec.calls.get("shell", [])
+        assert shell_calls
+        clone_call = shell_calls[0]
+        assert clone_call.get("_sudo") is True, (
+            "clone op must use _sudo=True to switch user"
+        )
+        assert clone_call.get("_sudo_user") == "claude", (
+            "clone op must run as the claude user (workdir is under /home/claude)"
+        )
+
     def test_synced_concierge_still_syncs_workspace(self, tmp_path):
         """A NON-git concierge (morty-like: has a workspace/ tree, no
         workspace_repo) must STILL sync workspace/ with delete=True."""

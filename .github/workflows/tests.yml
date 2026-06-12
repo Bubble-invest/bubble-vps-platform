@@ -8,5 +8,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install pyinfra pytest
+      - run: pip install pyinfra pytest pyyaml jinja2 jsonschema
       - run: python3 -m pytest lib/ -q --tb=short
