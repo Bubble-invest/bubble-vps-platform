@@ -3,7 +3,7 @@
 Each template is rendered with the bubble-internal tenant.yaml's
 cfg.hardening values and compared byte-for-byte to a committed golden file
 under lib/golden/hardening/. The golden file content matches what's actually
-on joris-cx33 (manually hardened 2026-05-06) — this is what makes the dogfood
+on {{VPS_HOST}} (manually hardened 2026-05-06) — this is what makes the dogfood
 test pass.
 
 Run with: python3.12 -m pytest lib/test_hardening_templates.py -v
@@ -67,7 +67,7 @@ def bubble_internal_cfg():
 def test_sshd_template_matches_golden(bubble_internal_cfg):
     """Rendering the sshd template with bubble-internal values must match the
     committed golden file (byte-for-byte) — which is the live content on
-    joris-cx33. This is what makes the dogfood pyinfra run report zero changes.
+    {{VPS_HOST}}. This is what makes the dogfood pyinfra run report zero changes.
     """
     sshd = bubble_internal_cfg.hardening.sshd
     rendered = _render(

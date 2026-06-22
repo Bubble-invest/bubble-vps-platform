@@ -12,7 +12,7 @@
 ## Problem
 
 On the morning of 2026-05-31 a production outage took the morty agent on
-joris-cx33 offline. Post-mortem found **four latent failure modes** that the
+{{VPS_HOST}} offline. Post-mortem found **four latent failure modes** that the
 platform source did not prevent, plus a deploy-coverage gap. The directive: the
 fix must live in the platform SOURCE (pyinfra tasks + templates + this SPEC),
 NOT as a manual one-off edit on the box, so that
@@ -41,7 +41,7 @@ enforced in source (pyinfra tasks + jinja templates) and guarded by tests in
   `cfg.agent.llm.model if cfg.agent.llm.model else CANONICAL_MODEL`, so a tenant
   may override via `agent.llm.model` but an empty value inherits this alias.
 - **Why we do NOT pin a version:** auto-upgrade is a deliberate requirement from
-  Joris. The bare `opus` alias auto-resolves to the LATEST Opus release, so when
+  {{OPERATOR}}. The bare `opus` alias auto-resolves to the LATEST Opus release, so when
   Opus 4.9+ ships our headless agents pick it up automatically. Pinning a
   version (e.g. `claude-opus-4-8[1m]`) would strand every agent on an old Opus
   long after a newer one exists — exactly what we want to avoid. The `[1m]`
@@ -216,7 +216,7 @@ naming conventions. This is INTENTIONAL design (NORTH-STAR), **not drift**:
 - **Parameterize names — no hardcoding (NORTH-STAR).** The tier and the prefix
   must be parameterized so the Tenant-as-a-Service / Bubble Local packaging
   works for ANY client. Never hardcode persona names ("morty"/"claudette") or
-  the operator ("Joris"); a client's concierge could be "Sandra". Only the
+  the operator ("{{OPERATOR}}"); a client's concierge could be "Sandra". Only the
   literal `bubble-ops-` department marker is fixed (it is the convention itself).
 - **Failure mode prevented:** *workdir mismatch* — a department deployed to the
   unprefixed `/home/claude/agents/<slug>` while its real working copy lives at

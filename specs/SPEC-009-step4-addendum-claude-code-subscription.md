@@ -3,13 +3,13 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Replaces** the auth-related portions of SPEC-007. SPEC-007's overall structure remains valid; this doc updates the credential-handling sections to reflect the current (post-2026-05-08-Joris-decision) auth model.
+**Replaces** the auth-related portions of SPEC-007. SPEC-007's overall structure remains valid; this doc updates the credential-handling sections to reflect the current (post-2026-05-08-{{OPERATOR}}-decision) auth model.
 
 ---
 
 ## What changed since SPEC-007 was written
 
-SPEC-007 assumed `provider: openrouter` with `OPENROUTER_API_KEY` in SOPS. Joris pivoted (msg 1640) to `provider: anthropic` with `auth_mode: claude_code_subscription`. The agent now uses a long-lived OAuth token from `claude setup-token` instead of an API key.
+SPEC-007 assumed `provider: openrouter` with `OPENROUTER_API_KEY` in SOPS. {{OPERATOR}} pivoted (msg 1640) to `provider: anthropic` with `auth_mode: claude_code_subscription`. The agent now uses a long-lived OAuth token from `claude setup-token` instead of an API key.
 
 The change is small in spirit but significant in the settings.json template.
 
@@ -101,7 +101,7 @@ only exercised by the interactive client; on a `systemd`-managed server the
 `accessToken` simply expires (typically ~daily) and the agent then 401s on its
 next API call. (Anthropic GitHub issues #50743 and #28827.)
 
-The historical band-aid was to copy Joris's Mac `~/.claude/.credentials.json`
+The historical band-aid was to copy {{OPERATOR}}'s Mac `~/.claude/.credentials.json`
 onto the box. It is brittle: it expires within a day and *races the Mac's own
 refresh* (the Mac rotates the token out from under the copy), needing a human in
 the loop on a roughly daily cadence.

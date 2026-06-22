@@ -12,7 +12,7 @@
 
 Install the Tailscale agent on every tenant box and register it with our tailnet using a SOPS-encrypted auth key. Once active:
 
-1. Operator (Joris) can SSH any tenant box via `ssh <hostname>` (Tailscale MagicDNS resolves the name) — bypasses public-IP rate-limits, works from any network
+1. Operator ({{OPERATOR}}) can SSH any tenant box via `ssh <hostname>` (Tailscale MagicDNS resolves the name) — bypasses public-IP rate-limits, works from any network
 2. Future per-tenant ACLs can scope which operator devices reach which tenant (per `access.tailscale.tags` in tenant.yaml)
 3. Phone-home daemon (Step 6b) and central dashboard (Step 6c) can talk to each tenant over the mesh
 4. Tenant box does NOT advertise routes or accept routes (avoid network coupling)
@@ -21,8 +21,8 @@ Install the Tailscale agent on every tenant box and register it with our tailnet
 
 ## Pre-requisites (from operator side, one-time)
 
-1. **Tailscale account exists** — `jorisdupraz@gmail.com` tailnet `tail408dcc.ts.net` confirmed
-2. **`tag:bubble-tenant` defined in tailnet ACL** — operator added `"tag:bubble-tenant": ["jorisdupraz@gmail.com"]` to tagOwners
+1. **Tailscale account exists** — `{{OPERATOR_EMAIL}}` tailnet `{{TAILNET}}.ts.net` confirmed
+2. **`tag:bubble-tenant` defined in tailnet ACL** — operator added `"tag:bubble-tenant": ["{{OPERATOR_EMAIL}}"]` to tagOwners
 3. **Reusable + pre-approved + tagged auth key generated** at admin/settings/keys — pasted via `operator-set-secret.sh --key=TAILSCALE_AUTHKEY`
 4. **`TAILSCALE_AUTHKEY` in tenant's secrets.sops.env** — added to `required_keys` in tenant.yaml
 
@@ -118,7 +118,7 @@ Works because `/run/claude-agent/env` is mode 0400 root:root + claude:claude (ro
 server.shell(
     commands=[
         "AUTHKEY=$(SOPS_AGE_KEY_FILE=/etc/age/key.txt /usr/local/bin/sops --decrypt /etc/bubble/secrets.sops.env 2>/dev/null | grep '^TAILSCALE_AUTHKEY=' | cut -d= -f2-) && "
-        "tailscale up --auth-key=\"$AUTHKEY\" --advertise-tags=tag:bubble-tenant --hostname=joris-cx33 --accept-routes=false --advertise-routes= --reset"
+        "tailscale up --auth-key=\"$AUTHKEY\" --advertise-tags=tag:bubble-tenant --hostname={{VPS_HOST}} --accept-routes=false --advertise-routes= --reset"
     ],
     _sudo=True,
 )
@@ -144,7 +144,7 @@ chmod 0400 /run/tailscale-authkey
 # Use it (no value in ps output)
 tailscale up --auth-key=file:/run/tailscale-authkey \
     --advertise-tags=tag:bubble-tenant \
-    --hostname=joris-cx33 \
+    --hostname={{VPS_HOST}} \
     --accept-routes=false --advertise-routes= --reset
 
 # Wipe immediately
@@ -174,10 +174,10 @@ Step 6a is DONE when:
 1. ✅ Tailscale apt package installed on box
 2. ✅ `tailscaled` service active + enabled
 3. ✅ Box registered with tailnet, visible in https://login.tailscale.com/admin/machines
-4. ✅ `ssh joris-cx33` from operator's Mac succeeds via Tailscale (resolves to 100.x.x.x)
+4. ✅ `ssh {{VPS_HOST}}` from operator's Mac succeeds via Tailscale (resolves to 100.x.x.x)
 5. ✅ Box's hostname appears with `tag:bubble-tenant` in admin console
 6. ✅ Re-running pyinfra task is idempotent (zero changes on second deploy)
-7. ✅ Public-IP SSH (`ssh -4 178.105.77.178`) still works as fallback (UFW LIMIT IN remains in place)
+7. ✅ Public-IP SSH (`ssh -4 {{VPS_IP}}`) still works as fallback (UFW LIMIT IN remains in place)
 8. ✅ Tests pass; deploy logs grep clean for `tskey-` and any other secret prefix
 
 ---
@@ -195,4 +195,4 @@ Step 6a is DONE when:
 
 1. **`--reset` flag risky?** It clears any prior `tailscale up` settings. Probably fine for our greenfield setup; document in case operator runs into existing state.
 2. **What if the auth key has expired?** `tailscale up` will fail with a clear error. The task should report this gracefully (not silently break).
-3. **MagicDNS hostname collision?** If two tenants have the same hostname, Tailscale auto-numbers them. We should use the tenant_name as the hostname (e.g. `joris-cx33` for our box, `acme-corp-vps` for client #1).
+3. **MagicDNS hostname collision?** If two tenants have the same hostname, Tailscale auto-numbers them. We should use the tenant_name as the hostname (e.g. `{{VPS_HOST}}` for our box, `acme-corp-vps` for client #1).

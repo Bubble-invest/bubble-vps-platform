@@ -4,7 +4,7 @@ Per SPEC-005 §"Public API". Reads cfg.hardening from tenant.yaml (via
 lib.host_helpers.get_tenant_config(host)) and dispatches to each sub-module.
 
 Each sub-module is responsible for its own idempotency. The litmus test:
-running this against an already-hardened joris-cx33 must report zero changes.
+running this against an already-hardened {{VPS_HOST}} must report zero changes.
 See tests/integration/test_dogfood_hardening.sh.
 
 This module can be invoked TWO ways:

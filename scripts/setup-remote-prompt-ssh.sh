@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap SSH access from this Mac to a remote Mac on the Tailscale network,
 # so `operator-set-secret.sh --remote-prompt=<host>` can pop password dialogs
-# on the remote Mac (e.g. Jade's Mac while she's at a different physical Mac).
+# on the remote Mac (e.g. {{OPERATOR_2}}'s Mac while she's at a different physical Mac).
 #
 # Usage:
 #   ./setup-remote-prompt-ssh.sh <remote-host>
@@ -25,8 +25,8 @@ set -uo pipefail
 REMOTE_HOST="${1:-}"
 if [[ -z "$REMOTE_HOST" ]]; then
     echo "Usage: $0 <remote-host>"
-    echo "Example: $0 macbook-air-jade"
-    echo "         $0 jade@macbook-air-jade"
+    echo "Example: $0 {{OPERATOR_2_HOST}}"
+    echo "         $0 {{OPERATOR_2_USER}}@{{OPERATOR_2_HOST}}"
     exit 2
 fi
 

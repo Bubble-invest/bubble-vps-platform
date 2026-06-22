@@ -206,6 +206,6 @@ Step 7c done when:
 
 - Programmatic Tailscale device removal (requires Tailscale API token in Keychain — defer to v2 when we automate at-scale)
 - Auto-emailing the client handoff doc (just prints to stdout — operator pastes into email)
-- DPA/SLA cancellation paperwork (legal-side, Jade owns)
+- DPA/SLA cancellation paperwork (legal-side, {{OPERATOR_2}} owns)
 - Snapshot retention (Hetzner snapshots: separate, manual via console for now)
 - Restoring an archived tenant back to active (not a flow we plan; if needed, manual `mv` from _archive back)

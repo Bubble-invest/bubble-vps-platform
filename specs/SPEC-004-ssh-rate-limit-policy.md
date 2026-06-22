@@ -3,14 +3,14 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Addresses:** Step 1 Finding #1 (intermittent SSH connection failures during rapid reconnects)
 
 ---
 
 ## Investigation
 
-UFW on joris-cx33 has `LIMIT IN` on port 22:
+UFW on {{VPS_HOST}} has `LIMIT IN` on port 22:
 
 ```
 [ 1] 22/tcp                     LIMIT IN    Anywhere    # SSH (rate-limited: 6 conns/30s/IP)

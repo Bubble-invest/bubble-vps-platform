@@ -123,7 +123,7 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
     # to disable prompts on a headless setup — bypassPermissions CANNOT be
     # activated via settings.json alone, must be a CLI flag at launch.
     # auto mode requires interactive TTY-bound opt-in (also won't work
-    # headless). joris-cx33 is an isolated single-tenant VM, fits the
+    # headless). {{VPS_HOST}} is an isolated single-tenant VM, fits the
     # doc's "isolated environments" criterion. Future per-tenant override
     # would go through a schema field (SPEC-001 v2).
     unit_op = files.template(

@@ -33,12 +33,12 @@
 #   ./scripts/operator-set-secret.sh --project=<path> --key=<KEY> \
 #       --remote-prompt=<ssh-host> [--label="..."]
 #
-#   Example (prompt opens on Jade's Mac, SOPS encrypt happens locally on Joris-Mac):
+#   Example (prompt opens on {{OPERATOR_2}}'s Mac, SOPS encrypt happens locally on {{OPERATOR}}-Mac):
 #     ./scripts/operator-set-secret.sh \
 #         --project=~/claude-workspaces/maya \
 #         --key=GOOGLE_API_KEY \
 #         --remote-prompt=macbook-air-2 \
-#         --label="Jade — paste the Google API key"
+#         --label="{{OPERATOR_2}} — paste the Google API key"
 #
 #   Security: secret travels remote-keyboard → remote osascript stdout → SSH (encrypted)
 #             → local script stdin → SOPS encrypt. Never touches disk in plaintext on

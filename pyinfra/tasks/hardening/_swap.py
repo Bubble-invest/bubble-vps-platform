@@ -7,7 +7,7 @@ Three-step:
        sysctl only if the file changed.
 
 Drift discovery (2026-05-08):
-    The sysctl file on joris-cx33 is `/etc/sysctl.d/99-bubble-swap.conf`
+    The sysctl file on {{VPS_HOST}} is `/etc/sysctl.d/99-bubble-swap.conf`
     (NOT `99-bubble-platform.conf` as parent agent decision suggested). The
     content is also unspaced — `vm.swappiness=10` not `vm.swappiness = 10`.
     Both formats are valid sysctl syntax but we match the file on the box
@@ -35,7 +35,7 @@ def apply(swap_cfg) -> None:
     swappiness = swap_cfg.swappiness if swap_cfg.swappiness is not None else 10
 
     # 1) Create the swapfile only if missing. The shell guard makes the whole
-    #    sequence a no-op when /swapfile exists (which it does on joris-cx33).
+    #    sequence a no-op when /swapfile exists (which it does on {{VPS_HOST}}).
     #    We use host.get_fact(File, ...) to avoid even running the shell op
     #    on subsequent runs — that keeps the pyinfra "Changed" count clean.
     swapfile_present = host.get_fact(File, path="/swapfile") is not None

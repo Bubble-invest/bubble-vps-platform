@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Depends on:** SPEC-006, SPEC-007, Phase D first-half (sops/age installed, box keypair generated, both recipients in `.sops.yaml`, secrets.sops.env updated via `sops updatekeys`)
 **Implements:** the second half of Step 3 of the Bubble VPS Platform build plan
 

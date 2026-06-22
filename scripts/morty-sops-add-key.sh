@@ -19,15 +19,15 @@
 #   9. SOPS_AGE_KEY_FILE=/etc/age/key.txt exported (Morty canonical age key path)
 #
 # Usage (Mac controller → Morty):
-#   cat ~/.config/<svc>/api_key | ssh joris-cx33 \
+#   cat ~/.config/<svc>/api_key | ssh {{VPS_HOST}} \
 #       'sudo -n /usr/local/bin/morty-sops-add-key /etc/bubble/secrets-<dept>.sops.env <KEY_NAME>'
 #
 # Verify success (no value displayed):
-#   ssh joris-cx33 "sudo -n bash -c 'SOPS_AGE_KEY_FILE=/etc/age/key.txt \
+#   ssh {{VPS_HOST}} "sudo -n bash -c 'SOPS_AGE_KEY_FILE=/etc/age/key.txt \
 #     sops --decrypt --output /run/lock/v.\$\$ /etc/bubble/secrets-<dept>.sops.env && \
 #     grep -c \"^<KEY_NAME>=\" /run/lock/v.\$\$ && shred -u /run/lock/v.\$\$'"
 #
-# Author: Rick (R&D), 2026-05-25, per Joris msg 3231 ("be most careful about
+# Author: Rick (R&D), 2026-05-25, per {{OPERATOR}} msg 3231 ("be most careful about
 # security of env secrets on VPS and add all necessary protections").
 set -eu
 set +x

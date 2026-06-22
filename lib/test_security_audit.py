@@ -76,7 +76,7 @@ LEAKED_PREFIXES = (
 _DEFAULT_RENDER_KWARGS = {
     "service_name": "claude-agent-morty.service",
     "decrypted_runtime_path": "/run/claude-agent/env",
-    "joris_telegram_user_id": "6532205130",
+    "operator_telegram_user_id": "100000001",
     "audit_log_dir": "/var/log/bubble-security",
     "expected_box_pubkey": "age1examplepubkeyfortestonly000000000000000000000000000000000",
 }
@@ -601,7 +601,7 @@ def test_telegram_post_respects_agentic_suppress_flag():
     emission so the agentic cron can send the single consolidated brief.
 
     The legacy raw-telegram path was confirmed as duplicate noise on
-    2026-05-12 (Joris received the raw 73/80 brief at 09:00 UTC even though
+    2026-05-12 ({{OPERATOR}} received the raw 73/80 brief at 09:00 UTC even though
     the agentic cron at 10:00 UTC also sent a brief). The fix: a sentinel
     env var `AGENTIC_AUDIT_SUPPRESS_TELEGRAM=1` makes the script skip the
     curl-to-telegram block while still writing to /var/log/bubble-security/.

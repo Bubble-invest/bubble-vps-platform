@@ -58,7 +58,7 @@ The drift test ([RUNBOOK.md](RUNBOOK.md) §"How to verify the hardening playbook
 ### Monitoring layer ([SPEC-014](../specs/SPEC-014-cloud-security-cron.md), [SPEC-015](../specs/SPEC-015-phone-home-dashboard.md), [SPEC-020](../specs/SPEC-020-cloud-wiki-sync.md))
 
 - Phone-home daemon — POSTs telemetry (no data content; only metadata: service-up, disk %, restart count, claude version) every 5 min to the central dashboard
-- Central dashboard on `joris-cx33` — Tailscale-only exposure, SQLite-backed, single page table view of all tenants
+- Central dashboard on `{{VPS_HOST}}` — Tailscale-only exposure, SQLite-backed, single page table view of all tenants
 - Daily security-audit cron at 09:00 UTC — reports to a Telegram chat with auth/secrets/agent/CVE/disk/transcripts/version/firewall checks
 - Cloud wiki sync — keeps the agent's shared-wiki in sync from a central source so on-box agents share knowledge with operator-side agents
 
@@ -91,7 +91,7 @@ For the per-process trust model on the box (which UID can read which file), see 
 ## Visibility model
 
 - **Phone-home daemon (per tenant)** — every 5 min POST to dashboard with telemetry only. Schema in [SPEC-015](../specs/SPEC-015-phone-home-dashboard.md) §"Telemetry contract".
-- **Central dashboard (one host, joris-cx33 for now)** — single web page with all tenants + click-through detail views. Tailscale-only exposure, never bound to 0.0.0.0.
+- **Central dashboard (one host, {{VPS_HOST}} for now)** — single web page with all tenants + click-through detail views. Tailscale-only exposure, never bound to 0.0.0.0.
 - **Security-audit cron (per tenant)** — daily 09:00 UTC report to a Telegram chat. 8 sections, 100-point score. See [SPEC-014](../specs/SPEC-014-cloud-security-cron.md).
 - **Telegram-watchdog cron (per tenant)** — 5 min cadence, posts only on broken-state recovery (silent on healthy state).
 

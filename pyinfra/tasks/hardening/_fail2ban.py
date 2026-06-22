@@ -5,7 +5,7 @@ fail2ban only if the file changed.
 
 Drift discovery (2026-05-08):
     The original SPEC-005 §_fail2ban.py says drop the config at
-    `/etc/fail2ban/jail.d/bubble.conf`. On joris-cx33 the actual file is at
+    `/etc/fail2ban/jail.d/bubble.conf`. On {{VPS_HOST}} the actual file is at
     `/etc/fail2ban/jail.local`. fail2ban reads BOTH locations, but jail.local
     is the historical convention and is what the manual hardening on 2026-05-06
     used. We match reality to keep dogfood at zero changes.
@@ -63,7 +63,7 @@ def apply(f2b_cfg) -> None:
         update=False,
     )
 
-    # 2) Render the config. Defaults (from joris-cx33's manual hardening)
+    # 2) Render the config. Defaults (from {{VPS_HOST}}'s manual hardening)
     #    apply when bans block is missing or has fields unset.
     bans = f2b_cfg.bans
     template_op = files.template(

@@ -2,7 +2,7 @@
 
 **Path:** `/usr/local/bin/bubble-gh`, `/usr/local/bin/bubble-git` (both root:root 0755)
 **Installed:** 2026-05-25
-**Why:** Joris flag msg 3208 — "Ok to use the GitHub CLI mentioned as option b in infra note".
+**Why:** {{OPERATOR}} flag msg 3208 — "Ok to use the GitHub CLI mentioned as option b in infra note".
 
 ## What they do
 
@@ -18,7 +18,7 @@ Both wrappers call the existing credential helper (`/usr/local/bin/bubble-gh-cre
 
 ## How install targeting works
 
-Path-hint parsing scans argv for `*Bubble-invest/*` or `*vdk888/*` substring. Catches:
+Path-hint parsing scans argv for `*Bubble-invest/*` or `*{{GITHUB_OWNER}}/*` substring. Catches:
 - `gh repo view owner/name`
 - `gh repo clone owner/name`
 - `gh api repos/owner/name/...` (the failing case at first deploy — now fixed)
@@ -29,12 +29,12 @@ For `bubble-git` only: if no argv hint, falls back to `git config --get remote.o
 
 Maps to:
 - `Bubble-invest/*` → install 135214360 (Bubble-invest GitHub App)
-- `vdk888/*` → install 134075326 (vdk888 GitHub App)
+- `{{GITHUB_OWNER}}/*` → install 134075326 ({{GITHUB_OWNER}} GitHub App)
 
 ## Tested 2026-05-25
 
 ```
-bubble-gh repo view vdk888/bubble-rnd-workspace       → ✅
+bubble-gh repo view {{GITHUB_OWNER}}/bubble-rnd-workspace       → ✅
 bubble-gh repo view Bubble-invest/bubble-ops-maya     → ✅
 bubble-gh api repos/Bubble-invest/bubble-ops-maya/commits → ✅ (after pattern fix)
 bubble-git push --dry-run origin onboarding/maya      → ✅ "Everything up-to-date"

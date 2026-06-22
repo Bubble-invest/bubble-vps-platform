@@ -35,8 +35,9 @@ SPEC-008 hard rule (no plaintext credential to stdout/stderr):
     echoed. See test_phone_home.py for static enforcement.
 
 DASHBOARD URL:
-    Hardcoded for v1 to http://100.110.56.18:3848/heartbeat — the tailnet
-    IP of joris-cx33 (where the dashboard lives, see tasks/monitoring/dashboard.py).
+    Defaults to the dashboard host's tailnet IP on port 3848. Override per
+    deployment with BUBBLE_DASHBOARD_URL (the tailnet IP of {{VPS_HOST}}, where
+    the dashboard lives — see tasks/monitoring/dashboard.py).
     Multi-tenant later: this becomes a tenant.yaml field
     (access.phone_home.dashboard_url) once we have a 2nd tenant. The schema
     field already exists as `dashboard_url_secret_ref` for the SOPS-stored
@@ -46,6 +47,7 @@ DASHBOARD URL:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pyinfra import host
@@ -66,10 +68,13 @@ _SERVICE_PATH = "/etc/systemd/system/phone-home.service"
 
 _BOT_PID_FILE = "/home/claude/.claude/channels/telegram/bot.pid"
 
-# v1: dashboard lives on joris-cx33; tailnet IP is stable per-device once
-# registered. Multi-tenant later: derive from a tenant.yaml field once a
-# 2nd tenant exists. See module docstring for rationale.
-_DASHBOARD_URL_V1 = "http://100.110.56.18:3848/heartbeat"
+# v1: dashboard lives on {{VPS_HOST}}; tailnet IP is stable per-device once
+# registered. Override per deployment with BUBBLE_DASHBOARD_URL; the default
+# uses a placeholder tailnet IP so the OSS repo ships no real infra address.
+# Multi-tenant later: derive from a tenant.yaml field once a 2nd tenant exists.
+_DASHBOARD_URL_V1 = os.environ.get(
+    "BUBBLE_DASHBOARD_URL", "http://100.64.0.1:3848/heartbeat"
+)
 
 
 def apply() -> None:

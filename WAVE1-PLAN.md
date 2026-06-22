@@ -1,18 +1,18 @@
 # Wave 1 — Wire bubble-ops-loop install scripts into pyinfra provisioning
 
 **Date:** 2026-06-08 · **Owner:** Rick (R&D) · **Status:** planning
-**Trigger:** Joris msg 320 — "careful step by step and detailed planning per phase"
+**Trigger:** {{OPERATOR}} msg 320 — "careful step by step and detailed planning per phase"
 
 ## Goal
 
 Make `bubble-vps-platform` pyinfra deploy invoke the existing battle-tested
 `bubble-ops-loop/scripts/install-*.sh` scripts instead of duplicating their
 logic in separate pyinfra task modules. The install scripts are already
-idempotent and live-verified on joris-cx33.
+idempotent and live-verified on {{VPS_HOST}}.
 
 ## Design constraint: Notion-optional
 
-Per Joris: "we use Notion internally and clients may too, but it should be
+Per {{OPERATOR}}: "we use Notion internally and clients may too, but it should be
 optional and agnostic." Every feature that touches Notion must:
 - Check for NOTION_API_KEY before attempting writes
 - Skip gracefully with a log message when absent

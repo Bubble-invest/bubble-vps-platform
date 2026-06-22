@@ -15,7 +15,7 @@ incoming` returns 0 when already deny), but `ufw limit 22/tcp` is NOT — it
 appends a duplicate rule each invocation. The presence guard is mandatory.
 
 Drift discovery (2026-05-08):
-    On joris-cx33, `ufw status verbose` shows TWO entries for the rate-limit
+    On {{VPS_HOST}}, `ufw status verbose` shows TWO entries for the rate-limit
     (one for IPv4, one for IPv6 — UFW splits automatically). Our presence
     check greps for `22/tcp` + `LIMIT`; if at least one row matches we skip
     the `ufw limit 22/tcp` invocation.

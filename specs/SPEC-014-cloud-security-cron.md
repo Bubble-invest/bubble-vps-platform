@@ -10,7 +10,7 @@
 
 ## Purpose
 
-Daily security audit running ON THE BOX (not on the Mac) that defends joris-cx33 against intrusion, drift, and credential-leakage. Posts findings to `@ContentbubbleClawbot` (per Joris's "share for now" decision in msg 1680). Ports the spirit of the Mac-side `security-daily-audit` cron, scoped to box-relevant checks only.
+Daily security audit running ON THE BOX (not on the Mac) that defends {{VPS_HOST}} against intrusion, drift, and credential-leakage. Posts findings to `@ContentbubbleClawbot` (per {{OPERATOR}}'s "share for now" decision in msg 1680). Ports the spirit of the Mac-side `security-daily-audit` cron, scoped to box-relevant checks only.
 
 NOT a port of the Mac cron's full surface — that one audits Mac-specific things (~/Library, brew, agent watchdog across ALL agents). This is a leaner box-only audit.
 
@@ -59,7 +59,7 @@ The Mac cron's G.8 step scans `~/.claude/projects/*/*.jsonl` for embedded creden
 - If installed is OLDER than the version recorded at last successful service start (drift signal), restart needed
 
 ### Part 8 — Hetzner Cloud Firewall
-- Verify the `bubble-default` firewall is still attached to the server: `hcloud server describe joris-cx33 -o json | jq .protection`
+- Verify the `bubble-default` firewall is still attached to the server: `hcloud server describe {{VPS_HOST}} -o json | jq .protection`
 - (Skip if hcloud not installed on the box — runs from operator side as a separate check)
 
 ---
@@ -69,7 +69,7 @@ The Mac cron's G.8 step scans `~/.claude/projects/*/*.jsonl` for embedded creden
 Single Telegram message to `@ContentbubbleClawbot` chat, formatted as:
 
 ```
-🛡 Security audit — joris-cx33 — 2026-05-09 09:00 UTC
+🛡 Security audit — {{VPS_HOST}} — 2026-05-09 09:00 UTC
 Score: 95/100  (was 95 yesterday)
 
 ✅ Auth & access (10/10): 0 banned, sshd clean, no new sudo grants

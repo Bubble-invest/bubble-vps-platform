@@ -17,7 +17,7 @@ WorkingDirectory=/home/claude/agents/morty
 # silently — claude looks for `bun` on PATH, doesn't find it, and never
 # spawns the plugin process. Symptom: service is "active", but no plugin
 # child processes, no Telegram polling, messages pile up in pending_update_count.
-# Fix discovered 2026-05-09 after Joris reported "Morty doesn't receive texts".
+# Fix discovered 2026-05-09 after {{OPERATOR}} reported "Morty doesn't receive texts".
 # Same gotcha as documented in projects/hetzner-migration/CLAUDE_AGENT_RECIPE.md
 # §"The four gotchas" #1 — applies to systemd just as it does to MCP child
 # spawning. settings.json's env.PATH is for claude's INTERNAL use; child-process
@@ -28,7 +28,7 @@ Environment=PATH=/home/claude/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:
 # The Telegram MCP plugin (server.ts) keeps ALL of its per-agent runtime state
 # — access.json, approved/, inbox/, .env AND bot.pid — under the directory
 # named by TELEGRAM_STATE_DIR, defaulting to ~/.claude/channels/telegram when
-# the var is UNSET. On a multi-concierge box (morty + claudette on joris-cx33)
+# the var is UNSET. On a multi-concierge box (morty + claudette on {{VPS_HOST}})
 # leaving it unset makes BOTH pollers default to the same bare telegram/ dir →
 # they clobber each other's bot.pid and fight over the single getUpdates
 # long-poll slot (Telegram 409 Conflict). So each unit exports its OWN dir.
@@ -73,7 +73,7 @@ EnvironmentFile=-/run/claude-agent/env
 # be activated from settings.json defaultMode alone — it MUST be passed as a
 # CLI flag at session start.
 #
-# Why this is acceptable here: joris-cx33 is an isolated single-tenant VM
+# Why this is acceptable here: {{VPS_HOST}} is an isolated single-tenant VM
 # (Hetzner CX33). Per the doc's own guidance: "Only use this mode in isolated
 # environments like containers, VMs, or dev containers". auto mode is
 # unreachable due to TTY-bound opt-in; acceptEdits still prompts on every

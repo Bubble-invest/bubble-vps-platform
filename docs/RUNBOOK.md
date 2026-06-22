@@ -23,7 +23,7 @@ The script does TWO runs in sequence:
 
 1. **Run 1**: applies the hardening profile from
    `pyinfra/tasks/hardening/linux.py` against the `bubble-internal` tenant
-   (joris-cx33). Asserts pyinfra reports `Changed: 0` and `Errors: 0`.
+   ({{VPS_HOST}}). Asserts pyinfra reports `Changed: 0` and `Errors: 0`.
 2. **Run 2**: re-runs to confirm idempotency. Asserts the same.
 
 Logs are written to:
@@ -81,7 +81,7 @@ disable chrony, edit the swap sysctl, etc).
 - **Hetzner Cloud Firewall** (hypervisor layer) — needs the `hcloud` API. Will land in Step 7 (provisioning task).
 - **Non-root user creation** — bootstrap concern. We assume the box is provisioned with the configured `host.ssh_user` already present and the operator's pubkey in `~/.ssh/authorized_keys`.
 - **SSH key deployment** — same.
-- **Disk encryption / LUKS** — not applied on joris-cx33; would have to be done at install time.
+- **Disk encryption / LUKS** — not applied on {{VPS_HOST}}; would have to be done at install time.
 - **AppArmor / SELinux profiles** — Ubuntu 24.04 ships AppArmor enabled; we leave defaults.
 - **Auditd** — overkill for our scale. Add if a client requires SOC2/ISO27001.
 
@@ -112,7 +112,7 @@ TENANT=bubble-internal ./.venv/bin/pyinfra --dry-run inventory.py deploy.py
 
 ---
 
-## Drift discoveries on joris-cx33 (2026-05-08, Step 2)
+## Drift discoveries on {{VPS_HOST}} (2026-05-08, Step 2)
 
 Our manual hardening on 2026-05-06 produced specific files that the playbook
 must match byte-for-byte to pass the dogfood test. Where SPEC-005 differed
@@ -133,7 +133,7 @@ These are documented in each sub-module's docstring (`pyinfra/tasks/hardening/_*
 
 ## Troubleshooting
 
-### "pyinfra reports N > 0 changes against a clean joris-cx33"
+### "pyinfra reports N > 0 changes against a clean {{VPS_HOST}}"
 
 You have drift. Either:
 1. Someone manually edited the box (verify with `ssh hetzner 'sudo cat <file>'`)
@@ -149,11 +149,11 @@ The deploy uses key-based SSH from the operator's Mac to `claude@<ip>`. Verify:
 
 ```bash
 ssh hetzner 'whoami; hostname'
-# Expect: claude / joris-cx33
+# Expect: claude / {{VPS_HOST}}
 ```
 
 If that works, pyinfra should too. If not, check `~/.ssh/config` has the
-`hetzner` alias mapping to `claude@178.105.77.178`.
+`hetzner` alias mapping to `claude@{{VPS_IP}}`.
 
 ### "UFW rate-limit blocks my deploy mid-run"
 
@@ -203,18 +203,18 @@ If the watchdog itself has been failing repeatedly, check
 
 ## Dashboard not loading
 
-Symptom: `http://joris-cx33.tail<id>.ts.net:3848/` does not load from a
+Symptom: `http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/` does not load from a
 tailnet device.
 
 ```bash
 # 1. From operator Mac — verify Tailscale is up and you're talking to the right node
-tailscale status | grep joris-cx33
+tailscale status | grep {{VPS_HOST}}
 
 # 2. From operator Mac — check the dashboard port responds
-curl -sS -o /dev/null -w "%{http_code}\n" http://joris-cx33.tail<id>.ts.net:3848/
+curl -sS -o /dev/null -w "%{http_code}\n" http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/
 
 # 3. SSH to the box and check the service
-ssh joris-cx33
+ssh {{VPS_HOST}}
 sudo systemctl status bubble-dashboard.service
 sudo journalctl -u bubble-dashboard.service --since "1h ago" | tail -50
 

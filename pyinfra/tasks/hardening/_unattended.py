@@ -4,7 +4,7 @@ Drops `/etc/apt/apt.conf.d/52unattended-upgrades-bubble` from a jinja2 template,
 verifies that unattended-upgrades.service is enabled.
 
 Drift discovery (2026-05-08):
-    The file on joris-cx33 contains MORE than the spec sketch — it overrides
+    The file on {{VPS_HOST}} contains MORE than the spec sketch — it overrides
     Allowed-Origins (security-only origins, no `-updates`/`-proposed`),
     Package-Blacklist (empty), Automatic-Reboot=true, Automatic-Reboot-WithUsers=true,
     Automatic-Reboot-Time=04:00, plus three Remove-Unused-* directives.

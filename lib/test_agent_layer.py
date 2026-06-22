@@ -125,7 +125,7 @@ def _join_adjacent_string_literals(source: str) -> str:
 
 
 # Default render kwargs — matches what _settings.py passes for bubble-internal.
-# Updated 2026-05-08 (post-Joris-feedback): the template now takes
+# Updated 2026-05-08 (post-{{OPERATOR}}-feedback): the template now takes
 # permission_mode + model jinja vars to allow auto mode + Opus selection.
 # Updated 2026-05-31 (SPEC-021): model set to the canonical auto-upgrading alias
 # `opus[1m]` (the "opus" family alias + `[1m]` 1M-context modifier). We do NOT
@@ -228,7 +228,7 @@ def test_settings_json_template_pins_canonical_model():
     `opus[1m]` (SPEC-021 invariant #1).
 
     `opus[1m]` = the "opus" family alias (auto-resolves to the LATEST Opus,
-    a deliberate auto-upgrade requirement from Joris) + the `[1m]` 1M-context
+    a deliberate auto-upgrade requirement from {{OPERATOR}}) + the `[1m]` 1M-context
     modifier. We do NOT pin a version. The literal "default" was the broken
     value (the 2026-05-31 production outage): the session never started and the
     Telegram plugin never spawned. `opus[1m]` resolves deterministically
@@ -356,7 +356,7 @@ def _render_systemd_for_bubble_internal(cfg) -> str:
 def test_systemd_unit_template_matches_golden(bubble_internal_cfg):
     """Render the systemd unit with bubble-internal cfg; compare to golden.
     The golden file is what pyinfra will write to /etc/systemd/system/ on
-    joris-cx33 — drift between this test and reality means the dogfood run
+    {{VPS_HOST}} — drift between this test and reality means the dogfood run
     will report unexpected changes.
     """
     rendered = _render_systemd_for_bubble_internal(bubble_internal_cfg)
@@ -1080,10 +1080,13 @@ class TestStep5aMortyPersonaArtifacts:
             "MEMORY.md missing the 'Morty fork' note appended per SPEC-010 "
             "§\"Memory inheritance\"."
         )
-        # joris_profile.md must be present (smoke-test acceptance criterion 7
-        # in SPEC-010 — Morty must surface Joris's profile on demand).
-        assert (memory_dir / "joris_profile.md").is_file(), (
-            "joris_profile.md not rsynced into Morty's agent-memory."
+        # operator_profile.md must be present (smoke-test acceptance criterion 7
+        # in SPEC-010 — Morty must surface the operator's profile on demand).
+        # NOTE: the actual file lives in the private bubble-vps-data persona
+        # tree; rename it there in lockstep so this data-coupled test (which
+        # skips when the data repo is absent) stays green on a dev box.
+        assert (memory_dir / "operator_profile.md").is_file(), (
+            "operator_profile.md not rsynced into Morty's agent-memory."
         )
 
     def test_morty_workspace_populated(self, morty_dir: Path):
@@ -1357,7 +1360,7 @@ class TestGitBackedConciergeWorkspace:
         concierge = _make_concierge(
             "claudette",
             "persona/claudette",
-            workspace_repo="https://github.com/vdk888/bubble-claudette-workspace.git",
+            workspace_repo="https://github.com/example-org/bubble-claudette-workspace.git",
         )
         return persona, concierge
 
@@ -1385,7 +1388,7 @@ class TestGitBackedConciergeWorkspace:
         )
         assert "git clone" in joined
         assert (
-            "https://github.com/vdk888/bubble-claudette-workspace.git" in joined
+            "https://github.com/example-org/bubble-claudette-workspace.git" in joined
         )
         # Clone target is the workdir directly — NOT under a workspace/ subdir.
         assert "/home/claude/agents/claudette/workspace" not in joined, (
@@ -1506,7 +1509,7 @@ class TestGitBackedConciergeWorkspace:
         concierge = _make_concierge(
             "claudette",
             "persona/claudette",
-            workspace_repo="https://github.com/vdk888/bubble-claudette-workspace.git",
+            workspace_repo="https://github.com/example-org/bubble-claudette-workspace.git",
             workspace_branch="staging",
         )
         cfg = _FakeCfg(str(tmp_path))

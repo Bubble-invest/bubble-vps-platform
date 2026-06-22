@@ -3,7 +3,7 @@
 **Status:** Draft v1.3
 **Author:** Lab (rnd)
 **Date:** 2026-05-08 (v1.2 multi-concierge: 2026-05-31; v1.3 git-backed workspace: 2026-05-31)
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 
 ---
 
@@ -24,7 +24,7 @@
   typically owns its repo too). See "Git-backed vs synced workspace" below.
 - **v1.2 (2026-05-31)** — MULTI-CONCIERGE per tenant. `agent.persona` (a single
   object) → `agent.concierges` (a LIST). A tenant may host MULTIPLE trusted
-  general-purpose concierges (Joris msg 3376). Each concierge is self-contained
+  general-purpose concierges ({{OPERATOR}} msg 3376). Each concierge is self-contained
   (name + persona_dir + channels + llm + optional systemd). The legacy single
   `agent.persona` form is still accepted as a BACK-COMPAT SHIM (normalized to a
   one-element list) so existing client tenants don't break. See
@@ -52,20 +52,20 @@ tenant_name: bubble-internal               # REQUIRED, lowercase-kebab. Matches 
 tenant_type: internal                       # REQUIRED. Enum: internal | client
 display_name: Bubble Internal               # REQUIRED. Human-readable.
 contact:                                    # REQUIRED for type=client, optional for internal
-  primary_email: joris@bubbleinvest.fr
-  primary_telegram_user_id: "6532205130"
+  primary_email: {{OPERATOR_EMAIL}}
+  primary_telegram_user_id: "{{OPERATOR_CHAT_ID}}"
 
 # ─── Infrastructure ─────────────────────────────────────────────────
 host:
-  ip: 178.105.77.178                        # REQUIRED. IPv4.
-  hostname: joris-cx33                      # REQUIRED. Used for SSH alias generation.
+  ip: {{VPS_IP}}                        # REQUIRED. IPv4.
+  hostname: {{VPS_HOST}}                      # REQUIRED. Used for SSH alias generation.
   ssh_user: claude                          # REQUIRED. The user pyinfra connects as.
   ssh_port: 22                              # OPTIONAL. Default 22.
   os_family: linux                          # REQUIRED. Enum: linux | macos
   os_distro: ubuntu                         # REQUIRED for linux. Enum: ubuntu | debian
   os_version: "24.04"                       # REQUIRED for linux.
   provider: hetzner                         # REQUIRED. Enum: hetzner | aws | gcp | byo
-  provider_server_id: "129474747"           # OPTIONAL. For Hetzner-API-driven cleanup.
+  provider_server_id: "{{HETZNER_SERVER_ID}}"           # OPTIONAL. For Hetzner-API-driven cleanup.
   region: fsn1-dc14                         # OPTIONAL. Provider-specific.
 
 # ─── Hardening profile ─────────────────────────────────────────────
@@ -93,7 +93,7 @@ hardening:
     swappiness: 10
   hetzner_cloud_firewall:
     enabled: true
-    firewall_id: "10938002"                 # OPTIONAL but recommended.
+    firewall_id: "{{HETZNER_FIREWALL_ID}}"                 # OPTIONAL but recommended.
 
 # ─── Agent configuration ───────────────────────────────────────────
 agent:
@@ -129,7 +129,7 @@ agent:
           enabled: true
           bot_token_secret_ref: TELEGRAM_BOT_TOKEN   # REQUIRED when enabled. Key name in secrets.sops.env.
           allowed_user_ids:                          # REQUIRED non-empty when enabled.
-            - "6532205130"
+            - "{{OPERATOR_CHAT_ID}}"
       llm:
         provider: anthropic                 # REQUIRED. Enum: openrouter | anthropic
         auth_mode: claude_code_subscription # api_key | claude_code_subscription

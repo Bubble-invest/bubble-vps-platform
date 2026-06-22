@@ -1,6 +1,6 @@
 # SPEC-022 — Agent-Type Secret-Handling Convention
 
-**Status:** ADOPTED · **Date:** 2026-06-03 · **Author:** Rick (R&D) · **Approved by:** Joris
+**Status:** ADOPTED · **Date:** 2026-06-03 · **Author:** Rick (R&D) · **Approved by:** {{OPERATOR}}
 **Supersedes drift:** consolidates the ad-hoc per-agent secret wiring observed in the 2026-06-03 fleet audit.
 **Related:** SPEC-006 (secrets-sops-age), SPEC-012 (secrets-restart-on-change), SPEC-021 (canonical-agent-setup)
 
@@ -13,7 +13,7 @@ Every agent's secret handling is determined by its **type**. Two types, two temp
 | Type | Definition | Members (2026-06-03) | Secret file | Recipients |
 |---|---|---|---|---|
 | **Concierge** | Cross-cutting agent serving the whole org; trusted with shared org-level secrets | claudette, morty | shared `/etc/bubble/secrets.sops.env` | **box key only** (`age155d7…`) — VPS-managed, not Mac-editable |
-| **Department** | Single-domain agent; isolated, sees only its own secrets | ben, maya, tony, cgp | per-dept `/etc/bubble/secrets-<slug>.sops.env` | **box key + Mac key** — two-way edit (Joris edits on Mac, box decrypts) |
+| **Department** | Single-domain agent; isolated, sees only its own secrets | ben, maya, tony, cgp | per-dept `/etc/bubble/secrets-<slug>.sops.env` | **box key + Mac key** — two-way edit ({{OPERATOR}} edits on Mac, box decrypts) |
 
 **Non-agents** (test fixtures, e.g. `fixture`) are NOT a type. They MUST NOT read either secret store. Keep them `systemctl disable`d.
 

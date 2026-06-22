@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Depends on:** SPEC-005 (hardening done), SPEC-006 (secrets layer done)
 **Implements:** Step 4 of the Bubble VPS Platform build plan
 
@@ -246,9 +246,9 @@ If Step 3's `_age_setup` needs operator-manual `.sops.yaml` update (first-bootst
 
 ---
 
-## Migration path (joris-cx33 specifically)
+## Migration path ({{VPS_HOST}} specifically)
 
-Currently joris-cx33 has:
+Currently {{VPS_HOST}} has:
 - `~/start-claude-agent.sh` running in tmux session `claude-agent`
 - `~/.claude/settings.json` with plaintext OR key
 - `~/.claude/channels/telegram/.env` with plaintext bot token
@@ -267,7 +267,7 @@ If anything fails between steps 2-4, we have a roll-forward path: re-run deploy,
 
 ## Open questions
 
-1. **What's the persona content for the first deploy?** Empty CLAUDE.md (placeholder) or a real Ricky persona moved from the Mac? Recommendation: empty placeholder for Step 4. Step 5 ("Persona") fills it for real with the agent identity decision Joris hasn't made yet.
+1. **What's the persona content for the first deploy?** Empty CLAUDE.md (placeholder) or a real Ricky persona moved from the Mac? Recommendation: empty placeholder for Step 4. Step 5 ("Persona") fills it for real with the agent identity decision {{OPERATOR}} hasn't made yet.
 
 2. **Should we install Claude Code from npm or from a checked-in binary?** Recommendation: npm (`npm install -g @anthropic-ai/claude-code`). Pinned version in tenant.yaml's `agent.install.claude_code_version`.
 

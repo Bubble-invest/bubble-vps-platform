@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Depends on:** SPEC-001 (tenant.yaml), SPEC-002 (inventory), SPEC-003 (host data exposure), SPEC-005 (hardening must be complete)
 **Implements:** Step 3 of the Bubble VPS Platform build plan
 
@@ -78,7 +78,7 @@ The plaintext-on-disk attack surface is reduced to ZERO on the box. The only per
 
 A SOPS-encrypted file can decrypt if ANY of its recipients is in the local age keyring. We use a **two-recipient model** per tenant:
 
-1. **The operator** (Joris's Mac) — has the master key. Can decrypt every tenant's secrets to edit them. Master key NEVER leaves the Mac.
+1. **The operator** ({{OPERATOR}}'s Mac) — has the master key. Can decrypt every tenant's secrets to edit them. Master key NEVER leaves the Mac.
 2. **The tenant box itself** — has its own per-tenant age key generated during deploy. Can decrypt only its own secrets.
 
 Add a third recipient when needed:
@@ -227,8 +227,8 @@ These must be true BEFORE we run Step 3:
 
 1. ✅ Step 1 done (platform repo + inventory works)
 2. ✅ Step 2 done (hardening idempotent, dogfood passes)
-3. ⚠️ **Joris has rotated the leaked OpenRouter key** (he confirmed this 2026-05-08 msg 1619)
-4. ⚠️ **Joris has rotated/regenerated the Telegram bot token** (in progress 2026-05-08 msg 1619)
+3. ⚠️ **{{OPERATOR}} has rotated the leaked OpenRouter key** (he confirmed this 2026-05-08 msg 1619)
+4. ⚠️ **{{OPERATOR}} has rotated/regenerated the Telegram bot token** (in progress 2026-05-08 msg 1619)
 5. ⚠️ **Operator master age key exists on the Mac** — if not, generate it: `age-keygen -o ~/.config/sops/age/keys.txt && chmod 600 ~/.config/sops/age/keys.txt && export SOPS_AGE_RECIPIENTS=$(age-keygen -y ~/.config/sops/age/keys.txt)`
 6. ⚠️ **`sops` and `age` installed on operator's Mac**: `brew install sops age`
 
@@ -265,7 +265,7 @@ Items 3-6 are blocking; Lab will check before kicking off the Step 3 implementat
 #  - sops + age installed
 #  - SOPS_AGE_KEY_FILE exported
 #  - bubble-vps-data has a real secrets.sops.env for bubble-internal
-#  - Joris rotated the keys (we never re-encrypt the leaked ones)
+#  - {{OPERATOR}} rotated the keys (we never re-encrypt the leaked ones)
 
 # 1. Run the secrets task
 TENANT=bubble-internal pyinfra inventory.py pyinfra/tasks/secrets/deploy.py
@@ -304,7 +304,7 @@ Step 3 includes a CLEANUP task: `tasks/secrets/_cleanup_legacy.py` removes the 8
 
 Step 3 is DONE when:
 
-1. ✅ sops + age installed on joris-cx33 (idempotent)
+1. ✅ sops + age installed on {{VPS_HOST}} (idempotent)
 2. ✅ /etc/age/key.txt exists, mode 0400
 3. ✅ secrets.sops.env in data repo (encrypted) is rsynced to /etc/bubble/secrets.sops.env
 4. ✅ Box can decrypt it: `sudo sops --decrypt /etc/bubble/secrets.sops.env` works without errors
@@ -326,7 +326,7 @@ Step 3 is DONE when:
 
 4. **Cleanup of the 8 known plaintext files** — should this happen in the SAME deploy as secrets bring-up, or a separate manual step? Recommendation: SAME deploy, AFTER verification step 4 succeeds. If verification fails, cleanup doesn't run. We don't strand ourselves without working keys.
 
-5. **What about the systemd unit?** Step 3 builds the secrets layer but doesn't yet wire it to a service. Step 4 (agent install) consumes it. Document this clearly so we don't leave Joris confused that the agent still runs from the old plaintext config until Step 4.
+5. **What about the systemd unit?** Step 3 builds the secrets layer but doesn't yet wire it to a service. Step 4 (agent install) consumes it. Document this clearly so we don't leave {{OPERATOR}} confused that the agent still runs from the old plaintext config until Step 4.
 
 ---
 

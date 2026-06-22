@@ -130,8 +130,8 @@ def apply() -> None:
         # mid-way still cleans up.
         #
         # Hostname: use the box's actual hostname (which we set to the tenant
-        # name at provisioning time — joris-cx33 is correct for bubble-internal).
-        # MagicDNS will then make `joris-cx33` resolve from any other tailnet
+        # name at provisioning time — {{VPS_HOST}} is correct for bubble-internal).
+        # MagicDNS will then make `{{VPS_HOST}}` resolve from any other tailnet
         # device.
         tags_arg = ""
         if ts.tags:

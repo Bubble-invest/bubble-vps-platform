@@ -35,7 +35,7 @@ The north-star says `ubuntu:24.04`. Three reasons to flip to `debian:12-slim`:
 
 **Rejected: Alpine.** `claude-code` (and Node-based MCP plugins generally) hit musl-vs-glibc bugs that bite at the worst possible moment. The Bun installer also recommends glibc. Not worth the savings.
 
-**Caveat**: if Joris already prefers `ubuntu:24.04` because that's what we test on for VPS, the cost of being inconsistent is real (different package versions, different default user, different `apt` cache layout). **Recommendation: stay on `ubuntu:24.04-noble` for v1.0 to keep parity with the VPS code paths, plan a Debian-slim migration as v2.0 if image-size feedback warrants.** TODO: verify with Joris which side of this tradeoff he prefers.
+**Caveat**: if {{OPERATOR}} already prefers `ubuntu:24.04` because that's what we test on for VPS, the cost of being inconsistent is real (different package versions, different default user, different `apt` cache layout). **Recommendation: stay on `ubuntu:24.04-noble` for v1.0 to keep parity with the VPS code paths, plan a Debian-slim migration as v2.0 if image-size feedback warrants.** TODO: verify with {{OPERATOR}} which side of this tradeoff he prefers.
 
 ### Init system: bash supervisor script (NOT systemd, NOT s6-overlay)
 
@@ -84,7 +84,7 @@ The north-star says `network_mode: bridge` + `extra_hosts` for api.anthropic.com
 
 **Decision: v1.0 ships with default Docker bridge networking (= full egress). v1.1 ships the DNS-allowlist sidecar as opt-in.** Reason: getting v1.0 to a state where Sandra works reliably is hard enough; adding egress restriction on day 1 means every "Sandra can't reach an MCP server because we forgot to allowlist it" becomes a deployment-blocking bug. Sell "egress restricted" as a v1.1 feature.
 
-The north-star promised "zero outbound network sauf api.anthropic.com" — this is a real promise to the client. **Joris should know we're punting it to v1.1.** TODO: confirm with Joris that v1.0 ships without egress restriction.
+The north-star promised "zero outbound network sauf api.anthropic.com" — this is a real promise to the client. **{{OPERATOR}} should know we're punting it to v1.1.** TODO: confirm with {{OPERATOR}} that v1.0 ships without egress restriction.
 
 ### Image distribution: GitHub Container Registry (NOT Docker Hub)
 
@@ -462,7 +462,7 @@ Concrete actions:
 - The install.sh preflight detects which engine is in use (`docker info | grep "Server Version"` vs `podman info`). It does NOT block Docker Desktop, but it does log "Detected Docker Desktop — ensure your organization has a valid subscription per docker.com/pricing."
 - The README-INSTALL.md has a paragraph: "Bubble Cabinet supports Docker Engine (recommended for servers), Podman Desktop (recommended for Mac/Windows workstations), or Docker Desktop (with your existing license)."
 
-This is the kind of decision that, if we miss it, will lead a client legal team to NACK the install at the last minute. **Treat it as a deal-breaker if not addressed.** TODO: verify with Joris that Bubble Invest is OK positioning Podman as an officially supported alternative.
+This is the kind of decision that, if we miss it, will lead a client legal team to NACK the install at the last minute. **Treat it as a deal-breaker if not addressed.** TODO: verify with {{OPERATOR}} that Bubble Invest is OK positioning Podman as an officially supported alternative.
 
 ---
 
@@ -626,7 +626,7 @@ The north-star skipped this. Without it, Sprint 1 starts blind.
 
 - **Files**: none committed (this is a spike). Output is a 1-page memo in `prototypes/bubble-cabinet-spike/REPORT.md` answering: "Does Docker Desktop on Mac M-series mount a 5GB volume without corruption after sleep/wake? Does Podman on Windows handle our compose file? Does claude-code in a `:slim` base image actually start?"
 - **Tests**: the 7 platform tests from §5 above, done by hand, results recorded.
-- **Acceptance**: ≥ 5/7 platforms pass. If < 5, escalate to Joris before Sprint 1.
+- **Acceptance**: ≥ 5/7 platforms pass. If < 5, escalate to {{OPERATOR}} before Sprint 1.
 - **Risks**: discovering on day 1 that gRPCFUSE corrupts SOPS-encrypted files (it has, historically, on certain Mac versions). Mitigation: this IS the spike's job.
 - **Honest estimate**: 6h.
 
@@ -709,12 +709,12 @@ The north-star skipped this. Without it, Sprint 1 starts blind.
   - `test_upgrade_script_rollback_uses_latest_pre_upgrade_snapshot` — rollback restores from the correct snapshot.
   - `test_restore_from_restic_full_volume_recovery` — `down -v` then restore → Sandra resumes.
   - `test_readme_install_renders_as_valid_markdown` — markdownlint passes.
-  - `test_readme_install_has_no_internal_jargon` — greps for "Lab", "Rick", "Morty", "vdk888" — none present.
+  - `test_readme_install_has_no_internal_jargon` — greps for "Lab", "Rick", "Morty", "{{GITHUB_OWNER}}" — none present.
 - **Acceptance criteria**:
   - A DSI who does NOT know bubble-ops-loop can follow README-INSTALL.md end-to-end without calling us.
   - upgrade.sh + rollback.sh are exercised in a manual test (no real v1.1 yet — uses a dummy `v1.0.1` tag for the round-trip).
   - All FR docs reviewed by a French native speaker for tone (Bureau-de-Cadre voice).
-- **Risks**: doc quality is a "you know it when you see it" thing — Joris should be the reviewer on Sprint 3 acceptance. Mitigation: send drafts via Telegram for sign-off.
+- **Risks**: doc quality is a "you know it when you see it" thing — {{OPERATOR}} should be the reviewer on Sprint 3 acceptance. Mitigation: send drafts via Telegram for sign-off.
 - **Honest estimate**: 5h. The north-star's 2h treats docs as an afterthought; that's how bad docs ship. 2h is "first draft of one of the three READMEs".
 
 **Sprint totals: 0 + 1 + 2 + 3 = 6 + 10 + 6 + 5 = 27 hours.** Roughly **2.25x the north-star's 12h estimate.** This is consistent with the "first-real-product factor" empirically observed on the VPS platform (`bubble-vps-platform` itself shipped at ~2x its initial estimate).
@@ -758,7 +758,7 @@ Total non-shared work (Cabinet-specific):
 - Sprint 3 docs: 5h
 - = **25h Cabinet-only** on top of the shared ~10h of T-a-a-S Sprints 1-3.
 
-**Recommendation**: pitch Joris on "Bubble Cabinet v1.0 ships ~4 weeks after T-a-a-S Sprint 3 wraps", not "12h total".
+**Recommendation**: pitch {{OPERATOR}} on "Bubble Cabinet v1.0 ships ~4 weeks after T-a-a-S Sprint 3 wraps", not "12h total".
 
 ---
 
@@ -766,4 +766,4 @@ Total non-shared work (Cabinet-specific):
 
 Two artifacts to treat as standalone: the **VPS-to-Container task map** (§6) tells the Sprint 1 sub-agent which pyinfra tasks to reuse vs ignore; the **Deal-breaker list** (§11) is what Sprint 0 must validate first.
 
-Questions for Joris before kickoff: (a) Debian vs Ubuntu base, (b) Podman as officially-supported alternative, (c) the new Sprint 0 spike, (d) the 12h → 27h estimate revision.
+Questions for {{OPERATOR}} before kickoff: (a) Debian vs Ubuntu base, (b) Podman as officially-supported alternative, (c) the new Sprint 0 spike, (d) the 12h → 27h estimate revision.

@@ -12,7 +12,7 @@
 # plus déchiffrer la passphrase pour récupérer la clé. Le Keychain natif
 # macOS rompt cette boucle — il est indépendant de la chaîne SOPS.
 #
-# Created: 2026-05-21, Joris directive msg 2823-2825.
+# Created: 2026-05-21, {{OPERATOR}} directive msg 2823-2825.
 # =============================================================================
 set -euo pipefail
 

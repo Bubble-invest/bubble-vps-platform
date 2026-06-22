@@ -2,14 +2,14 @@
 
 **Status:** Planning. Not yet started.
 **Owner:** Rick (R&D) — eventually shared with Tony (CEO) once execution starts.
-**Source conversation:** Telegram msgs 2782 → 2797 (2026-05-21 afternoon, Joris + Rick).
-**Origin:** Joris realized that `bubble-vps-platform` already provisions tenants but stops at "concierge agent only". To onboard a real client (or even a second internal tenant like Jade's instance), we need the full stack: concierge + framework agentique éclos (bubble-ops-loop) + bridge between them.
+**Source conversation:** Telegram msgs 2782 → 2797 (2026-05-21 afternoon, {{OPERATOR}} + Rick).
+**Origin:** {{OPERATOR}} realized that `bubble-vps-platform` already provisions tenants but stops at "concierge agent only". To onboard a real client (or even a second internal tenant like {{OPERATOR_2}}'s instance), we need the full stack: concierge + framework agentique éclos (bubble-ops-loop) + bridge between them.
 
 ---
 
 ## Vision
 
-> "On peut onboarder quelqu'un avec une solution de serveur + agent framework d'un seul coup." — Joris, msg 2780
+> "On peut onboarder quelqu'un avec une solution de serveur + agent framework d'un seul coup." — {{OPERATOR}}, msg 2780
 
 **One command** → a fresh client has:
 
@@ -85,7 +85,7 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 
 | Sprint | Capability | Estimate | Why |
 |---|---|---|---|
-| 1 | **Persona templating** — make `morty` a reusable concierge template that gets parameterized at tenant creation (`{owner_name, owner_telegram, concierge_name, accent/voice}`) | ~3h | Today morty's CLAUDE.md hardcodes "Joris" and "Lab" everywhere; a new tenant would inherit Joris-specific copy |
+| 1 | **Persona templating** — make `morty` a reusable concierge template that gets parameterized at tenant creation (`{owner_name, owner_telegram, concierge_name, accent/voice}`) | ~3h | Today morty's CLAUDE.md hardcodes "{{OPERATOR}}" and "Lab" everywhere; a new tenant would inherit {{OPERATOR}}-specific copy |
 | 2 | **bubble-ops-loop as a deployable dependency** — package the bubble-ops-loop skill+scripts so a fresh tenant gets it installed (currently the framework lives in Rick's local workspace, not yet shipped to a tenant box) | ~4h | The framework code needs to land on the tenant VPS so the concierge can use `bootstrap-dept.sh` for the client |
 | 3 | **Concierge skills + gate policies** — give the concierge the skills (a `dept-supervisor` skill that wraps `journalctl`, systemctl status, gate-policy-aware autonomy on restart/cleanup actions) and the `gate_policies` template | ~3h | Today the concierge has notion-reader, telegram-reporter, scheduled-task-creation, etc. — but no skill to OBSERVE / ACT on bubble-ops-loop depts |
 | 4 | **Bubble remote access** — Bubble Invest (us) gets SSH+sudo on every tenant VPS without seeing tenant's secrets, via a `bubble_admin_keys[]` block in tenant.yaml that pyinfra wires into `/root/.ssh/authorized_keys`. With audit log so the tenant can see when we connect | ~2h | Today only the tenant's own keys are deployed; we need a clean way to intervene without ad-hoc SSH key additions |
@@ -95,7 +95,7 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 
 ---
 
-## Decisions Joris validated (msg 2794, 2796)
+## Decisions {{OPERATOR}} validated (msg 2794, 2796)
 
 1. **One concierge per tenant, customizable** ("une copie de toi en gros mais personnalisable. C'est assez libre")
 2. **Concierge talks only to its owner** — no cross-tenant visibility. Bubble has elevated access when managing the server.
@@ -117,7 +117,7 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 
 ## Open questions to resolve before Sprint 1
 
-- **GitHub org for tenants' repos**: `vdk888/` (Joris's personal) or a future Bubble Invest org? Impacts the dept repo creation flow in `bootstrap-dept.sh`.
+- **GitHub org for tenants' repos**: `{{GITHUB_OWNER}}/` ({{OPERATOR}}'s personal) or a future Bubble Invest org? Impacts the dept repo creation flow in `bootstrap-dept.sh`.
 - **DNS for client-facing console**: today `tailscale-only` access. Do clients need a public URL (`marie.cabinets.bubbleinvest.com`) or stay Tailscale-only?
 - **Pricing model for paying clients**: bundled VPS + concierge + framework? À la carte? Impacts the `tenant.yaml` schema (`billing` block?).
 - **Concierge model choice**: Opus 4.7 (premium, costs more) or Sonnet 4.5 (cheaper but less reasoning)? Per-tenant choice in `tenant.yaml::agent.llm.model`?
@@ -133,15 +133,15 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 - ✅ Backup + DR documented (today)
 
 **Recommended order**:
-1. Maya first onboarding (validates the éclosion flow on `bubble-internal`, semi-clean) — Maya might be tomorrow or whenever Joris is ready
+1. Maya first onboarding (validates the éclosion flow on `bubble-internal`, semi-clean) — Maya might be tomorrow or whenever {{OPERATOR}} is ready
 2. Hardening sprint P1 from msg 2783 (PermitRootLogin, rotation drill) — 1.5h
 3. **Tenant-as-a-Service sprints 1-5** — ~14h, ideally start AFTER Maya proved the éclosion flow works in real life
-4. Onboard a SECOND tenant (`bubble-internal-jade` or a real `client-xxx`) as the integration test — proves Sprint 5 wasn't lying
+4. Onboard a SECOND tenant (`bubble-internal-{{OPERATOR_2}}` or a real `client-xxx`) as the integration test — proves Sprint 5 wasn't lying
 
 ---
 
 ## Risk: scope creep
 
-Joris and Rick must resist the temptation to make Tenant-as-a-Service "complete" before shipping. Ship Sprint 1+2+5 first (a tenant can be created and Sandra can talk to Marie), gate Sprint 3+4 behind real usage signals.
+{{OPERATOR}} and Rick must resist the temptation to make Tenant-as-a-Service "complete" before shipping. Ship Sprint 1+2+5 first (a tenant can be created and Sandra can talk to Marie), gate Sprint 3+4 behind real usage signals.
 
 The Karpathy principle #2 ("Simplicité d'abord") applies recursively to this roadmap itself.

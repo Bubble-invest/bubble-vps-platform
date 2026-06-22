@@ -1,6 +1,6 @@
 # Runbook: Durable Box-Native Claude Re-Auth
 
-> **Audience:** operator (Joris or delegated). **Prereqs:** SSH access to the
+> **Audience:** operator ({{OPERATOR}} or delegated). **Prereqs:** SSH access to the
 > box as `claude`, the tenant's age key + `sops`/`age` on your workstation, and
 > a browser to run `claude setup-token`.
 >

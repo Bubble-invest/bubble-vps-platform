@@ -10,17 +10,17 @@ This is the operational runbook for executing Step 3 (secrets layer). SPEC-006 (
 
 ## Three actors
 
-- **Joris** (operator, holds the master age key + the rotated secret values)
+- **{{OPERATOR}}** (operator, holds the master age key + the rotated secret values)
 - **Lab parent agent** (orchestrates, writes platform code, runs validation)
 - **Subagent** (does the mechanical box-side install)
 
-The rotated secrets MUST never appear in any agent's transcript. They go directly from Joris's keyboard into the SOPS-encrypted file.
+The rotated secrets MUST never appear in any agent's transcript. They go directly from {{OPERATOR}}'s keyboard into the SOPS-encrypted file.
 
 ---
 
-## Phase A — Operator-Mac bootstrap (Joris's hands, ~5 min)
+## Phase A — Operator-Mac bootstrap ({{OPERATOR}}'s hands, ~5 min)
 
-These are one-time setup steps Joris does on his Mac.
+These are one-time setup steps {{OPERATOR}} does on his Mac.
 
 ### A.1. Install tooling
 ```bash
@@ -42,7 +42,7 @@ The PUBLIC key (output of the last command) is what Lab will use in `.sops.yaml`
 
 ### A.3. Tell Lab the public key
 
-Joris pastes ONLY the public key (starts with `age1`) in Telegram. Public keys are safe to share — they encrypt, they don't decrypt.
+{{OPERATOR}} pastes ONLY the public key (starts with `age1`) in Telegram. Public keys are safe to share — they encrypt, they don't decrypt.
 
 → Lab updates `.sops.yaml` with this recipient.
 
@@ -63,12 +63,12 @@ SOPS_AGE_RECIPIENTS=age1abc...xyz sops --encrypt \
     /dev/null > tenants/bubble-internal/secrets.sops.env
 ```
 
-This produces an encrypted file containing zero key/value pairs but with valid SOPS metadata. Joris will populate it next.
+This produces an encrypted file containing zero key/value pairs but with valid SOPS metadata. {{OPERATOR}} will populate it next.
 
 Or simpler (a shape we can iterate on):
 ```bash
 cat > /tmp/initial-secrets.env <<'EOF'
-# Placeholders — Joris fills these in via `sops <file>` next.
+# Placeholders — {{OPERATOR}} fills these in via `sops <file>` next.
 OPENROUTER_API_KEY=PASTE_HERE
 TELEGRAM_BOT_TOKEN=PASTE_HERE
 TAILSCALE_AUTHKEY=PASTE_HERE_OR_LEAVE_AS_PLACEHOLDER_UNTIL_STEP_6
@@ -87,20 +87,20 @@ Add the `secrets:` block to `tenants/bubble-internal/tenant.yaml` per SPEC-006 (
 
 ---
 
-## Phase C — Joris paste-in (Joris's hands, ~2 min)
+## Phase C — {{OPERATOR}} paste-in ({{OPERATOR}}'s hands, ~2 min)
 
 ```bash
 cd ~/claude-workspaces/rnd/projects/bubble-vps-data
 sops tenants/bubble-internal/secrets.sops.env
 # Opens in $EDITOR with placeholders visible
-# Joris replaces PASTE_HERE with the rotated values
+# {{OPERATOR}} replaces PASTE_HERE with the rotated values
 # Saves — sops encrypts the file again automatically
 git status
 git diff --stat tenants/bubble-internal/secrets.sops.env  # encrypted diff is opaque, that's expected
 git commit -am "Step 3: populate bubble-internal secrets"
 ```
 
-Joris confirms in Telegram: "secrets populated, ready for box-side."
+{{OPERATOR}} confirms in Telegram: "secrets populated, ready for box-side."
 
 NOT in transcript: the secret values themselves.
 
@@ -136,7 +136,7 @@ After D.2, the deploy explicitly halts with a clear message:
 After that, re-run: ./scripts/deploy.sh --tenant=bubble-internal
 ```
 
-This is the ONE manual operator step in the bootstrap. Future deploys (e.g. when Joris rotates a key) skip it.
+This is the ONE manual operator step in the bootstrap. Future deploys (e.g. when {{OPERATOR}} rotates a key) skip it.
 
 ### D.4. (After re-run, the gate is past)
 - rsync `bubble-vps-data/tenants/bubble-internal/secrets.sops.env` → `/etc/bubble/secrets.sops.env`
@@ -154,16 +154,16 @@ This means after Step 3 the box has BOTH the encrypted layer (idle, not yet cons
 
 ## Phase E — Lab validation (Lab parent agent, ~3 min)
 
-Re-run dogfood + verify all D.4 checks pass. Run `pytest`. Post checkpoint to Joris.
+Re-run dogfood + verify all D.4 checks pass. Run `pytest`. Post checkpoint to {{OPERATOR}}.
 
 ---
 
 ## Why this split is safe
 
-- **Master age private key** — never leaves Joris's Mac. Not in any transcript.
-- **Rotated OR key + bot token** — go from Joris's keyboard directly into the SOPS file via `sops` invocation in his terminal. Never in any transcript.
+- **Master age private key** — never leaves {{OPERATOR}}'s Mac. Not in any transcript.
+- **Rotated OR key + bot token** — go from {{OPERATOR}}'s keyboard directly into the SOPS file via `sops` invocation in his terminal. Never in any transcript.
 - **Box age private key** — generated on the box, never leaves the box (only its public key is shared).
-- **Public keys** — safe to share, but only via Telegram messages from Joris (control point) to Lab. Lab does not generate any keys.
+- **Public keys** — safe to share, but only via Telegram messages from {{OPERATOR}} (control point) to Lab. Lab does not generate any keys.
 - **Encrypted secrets file** — lives in git (data repo). Even if accidentally pushed public, it cannot be decrypted without one of the recipient private keys.
 
 ---
@@ -180,4 +180,4 @@ After Step 3, you have:
 - ⚠ The OLD agent still running with stale keys (broken since the rotation)
 - ⚠ 8 plaintext files still on disk (will be deleted at Step 4)
 
-This is the right place to checkpoint with Joris. Step 4 is the cutover.
+This is the right place to checkpoint with {{OPERATOR}}. Step 4 is the cutover.

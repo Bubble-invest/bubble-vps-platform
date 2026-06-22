@@ -51,6 +51,7 @@ WIKI_DIR layout mirror:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pyinfra import host
@@ -73,7 +74,11 @@ _SERVICE_PATH = "/etc/systemd/system/cloud-wiki-sync.service"
 
 _WIKI_DIR = "/home/claude/.claude/agent-memory/shared-wiki"
 _WIKI_PARENT_DIR = "/home/claude/.claude/agent-memory"
-_WIKI_REMOTE_URL = "https://github.com/vdk888/bubble-shared-wiki"
+# GitHub owner/org for the shared-wiki repo. Override per-deployment with
+# BUBBLE_GITHUB_OWNER; defaults to a generic placeholder org so the OSS repo
+# ships no personal handle.
+_WIKI_GITHUB_OWNER = os.environ.get("BUBBLE_GITHUB_OWNER", "example-org")
+_WIKI_REMOTE_URL = f"https://github.com/{_WIKI_GITHUB_OWNER}/bubble-shared-wiki"
 # Lock lives INSIDE /run/cloud-wiki-sync/ (created by systemd's
 # RuntimeDirectory= directive, owned by claude). /run/ itself is root-owned
 # so we can't mkdir directly there from the User=claude script.
@@ -92,8 +97,8 @@ def apply() -> None:
         return
     decrypted_runtime_path = s.decrypted_runtime_path
 
-    joris_telegram_user_id = cfg.contact.primary_telegram_user_id
-    if not joris_telegram_user_id:
+    operator_telegram_user_id = cfg.contact.primary_telegram_user_id
+    if not operator_telegram_user_id:
         # Per SPEC-020, conflict-abort path posts a Telegram alert. Without
         # contact.primary_telegram_user_id, the alert can't escalate. Bail
         # rather than ship a half-broken sync.
@@ -147,7 +152,7 @@ def apply() -> None:
         lock_dir=_LOCK_DIR,
         credential_helper_path=_CREDENTIAL_HELPER_PATH,
         decrypted_runtime_path=decrypted_runtime_path,
-        joris_telegram_user_id=joris_telegram_user_id,
+        operator_telegram_user_id=operator_telegram_user_id,
         # CLAUDE-OWNED target (/home/claude/scripts/...) → escalate to claude so
         # the script ends up owned by claude:claude. `_sudo=True, _sudo_user="claude"`.
         _sudo=True,
@@ -160,7 +165,7 @@ def apply() -> None:
     # the helper inherits. Pattern:
     #   TOKEN=$(awk ... env)
     #   GIT_ASKPASS=<helper> GITHUB_TOKEN=$TOKEN GIT_TERMINAL_PROMPT=0 \
-    #       git clone https://github.com/vdk888/bubble-shared-wiki <dir>
+    #       git clone https://github.com/example-org/bubble-shared-wiki <dir>
     # After clone, configure credential.helper for subsequent pulls/pushes.
     # The `test -d ... || (...)` guard makes this idempotent: re-runs after
     # successful clone are no-ops.

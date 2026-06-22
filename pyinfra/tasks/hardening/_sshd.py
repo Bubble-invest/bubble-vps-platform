@@ -9,7 +9,7 @@ file and is a no-op when they match. The validation+reload only run on change
 (via the _if=op.did_change predicate).
 
 Drift discovery (2026-05-08):
-    The file on joris-cx33 is named 00-bubble-hardening.conf (NOT 99-bubble.conf
+    The file on {{VPS_HOST}} is named 00-bubble-hardening.conf (NOT 99-bubble.conf
     as SPEC-005 §_sshd.py suggests). The 00- prefix is intentional: it loads
     BEFORE /etc/ssh/sshd_config.d/50-cloud-init.conf which Ubuntu's cloud-init
     writes with PasswordAuthentication yes. For the auth-mode directives the

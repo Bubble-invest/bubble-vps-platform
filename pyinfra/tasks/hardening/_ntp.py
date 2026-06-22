@@ -5,7 +5,7 @@ Installs chrony, ensures the chrony daemon is running and enabled.
 Note (parent decision 2026-05-08):
     chrony is added even though the manual hardening on 2026-05-06 left
     Ubuntu's default `systemd-timesyncd` in place. The first dogfood run
-    against joris-cx33 will therefore report ONE change (chrony install).
+    against {{VPS_HOST}} will therefore report ONE change (chrony install).
     Subsequent runs will be clean. This is intentional — drift-free time
     is a basic requirement for a hardened production box, and chrony has
     better stratum-NTP behaviour than timesyncd.

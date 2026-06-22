@@ -75,7 +75,7 @@ def get_secrets_file(host) -> Path:
 # '.claude','channels','telegram')`). bot.pid lives at
 # `join(STATE_DIR, 'bot.pid')`.
 #
-# On a single-agent box that default (bare `telegram/`) is fine. But Joris's
+# On a single-agent box that default (bare `telegram/`) is fine. But {{OPERATOR}}'s
 # fleet runs MULTIPLE agents per box, and each agent MUST have its own channel
 # dir + its own bot token — otherwise two pollers fight over the same
 # `getUpdates` long-poll slot and Telegram returns 409 Conflict (the exact bug

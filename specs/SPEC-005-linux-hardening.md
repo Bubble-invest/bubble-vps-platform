@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Depends on:** SPEC-001 (tenant.yaml schema), SPEC-002 (inventory + deploy)
 **Implements:** Step 2 of the Bubble VPS Platform build plan
 
@@ -11,14 +11,14 @@
 
 ## Purpose
 
-Port the manual hardening done on `joris-cx33` (2026-05-06) into pyinfra
+Port the manual hardening done on `{{VPS_HOST}}` (2026-05-06) into pyinfra
 code. Make it **declarative + idempotent** so that:
 
 1. Re-running against an already-hardened box reports **zero changes** ("dogfood validation")
 2. Running against a fresh Ubuntu 24.04 box brings it to the same hardened state
 3. Future drift (someone disables fail2ban, or `apt remove ufw`) is detected by re-running
 
-The dogfood validation is the litmus test. If `pyinfra deploy` against `joris-cx33` reports a single change, we have drift between code and reality. Goal is **zero changes** on the dogfood run.
+The dogfood validation is the litmus test. If `pyinfra deploy` against `{{VPS_HOST}}` reports a single change, we have drift between code and reality. Goal is **zero changes** on the dogfood run.
 
 ---
 
@@ -42,7 +42,7 @@ What pyinfra can manage from the operator's Mac via SSH:
 - **Hetzner Cloud Firewall** (item 7 in original hardening) — hypervisor-level, requires `hcloud` API. Defer to Step 7 (provisioning task).
 - **Non-root user creation** (item 1) — bootstrap concern. v1 assumes the box is provisioned with the configured `host.ssh_user` already present. Document this as a Step 0 prerequisite.
 - **SSH key deployment** — same; assume key is already authorized.
-- **Disk encryption / LUKS** — not present on joris-cx33 (Hetzner CX33 doesn't ship encrypted-by-default). Add later if needed.
+- **Disk encryption / LUKS** — not present on {{VPS_HOST}} (Hetzner CX33 doesn't ship encrypted-by-default). Add later if needed.
 - **AppArmor / SELinux profiles** — Ubuntu 24.04 has AppArmor enabled by default; we leave defaults for v1.
 - **Auditd** — overkill for our scale. Add later if a client requires SOC2/ISO27001.
 
@@ -50,7 +50,7 @@ What pyinfra can manage from the operator's Mac via SSH:
 
 ## Configuration → tenant.yaml
 
-The hardening task reads its config from `cfg.hardening` (already specified in SPEC-001). All fields are tenant-overridable. Per-field defaults match what's currently on `joris-cx33`.
+The hardening task reads its config from `cfg.hardening` (already specified in SPEC-001). All fields are tenant-overridable. Per-field defaults match what's currently on `{{VPS_HOST}}`.
 
 ```yaml
 hardening:
@@ -77,7 +77,7 @@ hardening:
     swappiness: 10
   hetzner_cloud_firewall:
     enabled: true              # informational — Step 7 manages
-    firewall_id: "10938002"
+    firewall_id: "{{HETZNER_FIREWALL_ID}}"
 ```
 
 ---
@@ -259,7 +259,7 @@ For each sub-module:
 #!/bin/bash
 set -euo pipefail
 
-cd /Users/joris/claude-workspaces/rnd/projects/bubble-vps-platform
+cd /Users/{{OPERATOR_USER}}/claude-workspaces/rnd/projects/bubble-vps-platform
 
 # Run the full hardening task once and capture pyinfra's "Changed" count
 TENANT=bubble-internal pyinfra inventory.py pyinfra/tasks/hardening/linux.py 2>&1 | tee /tmp/hardening-run1.log
@@ -269,13 +269,13 @@ NO_CHANGES=$(grep "Grand total" /tmp/hardening-run1.log | awk '{print $7}')
 echo "Changed: $CHANGES, No-change: $NO_CHANGES"
 
 if [ "$CHANGES" != "0" ]; then
-    echo "❌ DOGFOOD FAILURE: pyinfra reported $CHANGES changes against the already-hardened joris-cx33."
+    echo "❌ DOGFOOD FAILURE: pyinfra reported $CHANGES changes against the already-hardened {{VPS_HOST}}."
     echo "   This means there's drift between the playbook and reality. Review the changes:"
     grep -E "(Changed|Started|Stopped|Wrote|Installed)" /tmp/hardening-run1.log
     exit 1
 fi
 
-echo "✅ DOGFOOD PASS: zero changes against joris-cx33."
+echo "✅ DOGFOOD PASS: zero changes against {{VPS_HOST}}."
 
 # Run again to confirm 2nd-run is also zero (sanity check)
 TENANT=bubble-internal pyinfra inventory.py pyinfra/tasks/hardening/linux.py 2>&1 | tee /tmp/hardening-run2.log
@@ -315,7 +315,7 @@ Document this drift test in `docs/RUNBOOK.md` as "How to verify hardening playbo
 Step 2 is DONE when:
 
 1. ✅ All 6 sub-modules implemented + tested
-2. ✅ Dogfood validation passes: `pyinfra ... hardening/linux.py` against joris-cx33 reports **zero changes** on first run
+2. ✅ Dogfood validation passes: `pyinfra ... hardening/linux.py` against {{VPS_HOST}} reports **zero changes** on first run
 3. ✅ 2nd run also reports zero changes (idempotent)
 4. ✅ Manual drift test shows pyinfra detects + corrects an introduced drift
 5. ✅ Unit tests for templates pass (golden file compare)
@@ -328,7 +328,7 @@ Step 2 is DONE when:
 
 ## Open questions
 
-1. **NTP/chrony was NOT explicitly listed in the original 7-step hardening.** Do we add it as item 8 because it's table-stakes, or skip to match reality? Recommendation: **add it.** Ubuntu 24.04 ships with `systemd-timesyncd` enabled, which provides NTP — but chrony is more accurate and the standard for hardened production boxes. Adding it is a one-time small change that the playbook will report on the first dogfood run; subsequent runs are clean. **Option B** (defer): leave timesyncd alone, document in RUNBOOK that chrony is recommended but not enforced. Decision for Joris.
+1. **NTP/chrony was NOT explicitly listed in the original 7-step hardening.** Do we add it as item 8 because it's table-stakes, or skip to match reality? Recommendation: **add it.** Ubuntu 24.04 ships with `systemd-timesyncd` enabled, which provides NTP — but chrony is more accurate and the standard for hardened production boxes. Adding it is a one-time small change that the playbook will report on the first dogfood run; subsequent runs are clean. **Option B** (defer): leave timesyncd alone, document in RUNBOOK that chrony is recommended but not enforced. Decision for {{OPERATOR}}.
 
 2. **Sysctl file naming** — `/etc/sysctl.d/99-bubble.conf` collides with future tenant-specific overrides. Recommendation: scope it as `99-bubble-platform.conf` (note the suffix). Late-numbered (99) so it overrides distro defaults but allows tenant additions in `100-tenant.conf`.
 

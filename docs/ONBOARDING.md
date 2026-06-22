@@ -69,7 +69,7 @@ Run from `~/code/bubble-vps-platform`. The exact same command sequence as [INSTA
 ## Post-deploy verification (~5 min, manual smoke test)
 
 - [ ] **Telegram smoke test.** Send "hello" to the client's bot; expect a reply within ~5s. If no reply: see [RUNBOOK.md](RUNBOOK.md) §"Telegram plugin not responding".
-- [ ] **Dashboard check.** Open `http://joris-cx33.tail<id>.ts.net:3848/` from any tailnet device. Expect a row for `<name>` showing green / heartbeat in the last 5 min / agent uptime / claude version. If missing: see [RUNBOOK.md](RUNBOOK.md) §"Dashboard not loading".
+- [ ] **Dashboard check.** Open `http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/` from any tailnet device. Expect a row for `<name>` showing green / heartbeat in the last 5 min / agent uptime / claude version. If missing: see [RUNBOOK.md](RUNBOOK.md) §"Dashboard not loading".
 - [ ] **Security audit verification.** Either wait for tomorrow 09:00 UTC (the daily timer fires on its own — see [SPEC-014](../specs/SPEC-014-cloud-security-cron.md)) or trigger manually: `ssh <name>-vps 'sudo systemctl start bubble-security-audit.service'`. Confirm a report posts to `@ContentbubbleClawbot` (or the tenant's audit chat).
 - [ ] **Tailscale device check.** `tailscale status | grep <name>` from operator Mac. Expect to see the box online with `tag:bubble-tenant`.
 - [ ] **Drift check.** `./scripts/deploy.sh --tenant=<name>` a third time — should report 0 changes (idempotency proof).

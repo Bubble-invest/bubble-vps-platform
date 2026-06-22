@@ -18,7 +18,8 @@
 #   - hcloud CLI (brew install hcloud)
 #   - jq (brew install jq)
 #   - HCLOUD_TOKEN in macOS Keychain: service="hetzner-cloud", account="api_token"
-#   - Existing Hetzner SSH key (default: first key matching "joris" case-insensitive)
+#   - Existing Hetzner SSH key (default: first key matching $BUBBLE_SSH_KEY_FILTER,
+#     or "operator" if unset; case-insensitive). Override with --ssh-key=NAME.
 #   - Existing Hetzner Firewall named "bubble-default"
 #   - Tenant scaffolding from new-tenant.sh already in $BUBBLE_DATA_REPO/tenants/<name>/
 #
@@ -47,7 +48,7 @@ TENANT_NAME=""
 SERVER_TYPE="cx33"
 REGION="fsn1"
 IMAGE="ubuntu-24.04"
-SSH_KEY_FILTER="joris"
+SSH_KEY_FILTER="${BUBBLE_SSH_KEY_FILTER:-operator}"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do

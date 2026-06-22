@@ -148,7 +148,7 @@ log "recovery FAILED — alerting via direct curl"
 TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' /run/claude-agent/env 2>/dev/null)
 if [[ -n "$TOKEN" ]]; then
     curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-        -d chat_id="6532205130" \
+        -d chat_id="{{OPERATOR_CHAT_ID}}" \
         -d text="🚨 telegram-watchdog: $SERVICE plugin broken ($reason). Auto-restart at $(ts) didn't recover. Manual investigation needed." \
         > /dev/null
 fi
@@ -209,7 +209,7 @@ Future hardening: switch to `curl --config <file>` form to keep the URL short an
 ## pyinfra task: `pyinfra/tasks/access/telegram_watchdog.py`
 
 Idempotent install:
-1. Render `/home/claude/scripts/telegram-watchdog.sh` from `pyinfra/templates/telegram-watchdog.sh.j2` (jinja vars: SERVICE, BOT_PID_FILE, COOLDOWN_SECONDS, JORIS_TG_USER_ID for alerts)
+1. Render `/home/claude/scripts/telegram-watchdog.sh` from `pyinfra/templates/telegram-watchdog.sh.j2` (jinja vars: SERVICE, BOT_PID_FILE, COOLDOWN_SECONDS, OPERATOR_TG_USER_ID for alerts)
 2. Drop systemd `.timer` and `.service` units from templates
 3. Drop sudoers rule
 4. `systemctl daemon-reload` (gated on any unit/sudoers change)

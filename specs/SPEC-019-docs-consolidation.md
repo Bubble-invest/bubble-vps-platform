@@ -37,7 +37,7 @@ NOT a goal: rewriting any of the SPEC-001…018 docs. Those stay as-is, the cons
 - For operators: link to `docs/INSTALL.md`
 - For developers: link to `docs/CONTRIBUTING.md` (defer this; not Phase 1)
 - Status badge (X/Y tests passing)
-- License (MIT or proprietary — TBD with Joris)
+- License (MIT or proprietary — TBD with {{OPERATOR}})
 
 ### 2. `docs/INSTALL.md` (expand existing)
 
@@ -60,7 +60,7 @@ Currently ~50 lines covering operator setup. Expand to ~200 lines covering:
 
 ### 3. `docs/ONBOARDING.md` (new)
 
-~100 lines. Operator-facing playbook for "deal closed → tenant operational". The actual checklist Joris/Lab follow when a real client signs up:
+~100 lines. Operator-facing playbook for "deal closed → tenant operational". The actual checklist {{OPERATOR}}/Lab follow when a real client signs up:
 
 ```
 # Tenant onboarding playbook
@@ -90,7 +90,7 @@ Currently ~50 lines covering operator setup. Expand to ~200 lines covering:
 
 ## Post-deploy verification (5 min, manual)
 1. Smoke test: send "hello" to the client's Telegram bot, expect a reply
-2. Open dashboard: http://joris-cx33.tail408dcc.ts.net:3848/, see tenant row
+2. Open dashboard: http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/, see tenant row
 3. Check security audit ran on first deploy (or wait for tomorrow 09:00 UTC)
 4. Send client their welcome email with:
    - Their bot's @username
@@ -171,6 +171,6 @@ Step 7d done when:
 
 - CONTRIBUTING.md (defer — no external contributors yet)
 - A separate API reference doc for the pyinfra task modules (the specs serve this role)
-- Diagrams (text-only for now; if Joris wants visuals later, separate)
+- Diagrams (text-only for now; if {{OPERATOR}} wants visuals later, separate)
 - Marketing/sales pages (different audience, different doc tree)
 - Translation (we work in English internally)

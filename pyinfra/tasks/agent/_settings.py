@@ -149,7 +149,7 @@ def apply() -> None:
     #     stay on acceptEdits.
     #   - model: defaults to the auto-upgrading alias `opus[1m]` (the "opus"
     #     family alias, which resolves to the LATEST Opus, + the `[1m]`
-    #     1M-context modifier). We intentionally do NOT pin a version: Joris
+    #     1M-context modifier). We intentionally do NOT pin a version: {{OPERATOR}}
     #     wants auto-upgrade so agents move to Opus 4.9+ automatically when it
     #     ships instead of being stranded on an old pinned id. The literal
     #     "default" was the broken value (the 2026-05-31 outage root cause):

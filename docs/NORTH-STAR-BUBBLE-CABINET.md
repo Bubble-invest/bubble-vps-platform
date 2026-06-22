@@ -2,8 +2,8 @@
 
 **Audience**: tout sub-agent qui prend la mission "Bubble Local" du R&D BACKLOG.md. **Lis ce doc AVANT de coder une seule ligne.** Il décrit l'expérience opérateur cible — la chose qu'on essaie de rendre vraie. Sans cette boussole, tu vas faire des choix techniquement corrects mais qui ratent la vision.
 
-**Source conversation**: Joris ↔ Rick Telegram msgs 2799-2816, 2026-05-21 après-midi.
-**Status**: vision validée par Joris. Implémentation à venir (12h estimées sur 3 sprints).
+**Source conversation**: {{OPERATOR}} ↔ Rick Telegram msgs 2799-2816, 2026-05-21 après-midi.
+**Status**: vision validée par {{OPERATOR}}. Implémentation à venir (12h estimées sur 3 sprints).
 
 ---
 
@@ -99,7 +99,7 @@ Tu repars, il a son cabinet qui tourne, son concierge Sandra qui parle au owner 
 
 ---
 
-## Décisions architecturales validées par Joris
+## Décisions architecturales validées par {{OPERATOR}}
 
 1. **Garde Telegram** comme canal de communication (msg 2807) — pas d'effort sur Matrix/Signal alternative
 2. **Un concierge par tenant, customizable** — le client choisit le nom (Sandra, Karl, etc.) et idéalement la voix/style
@@ -181,10 +181,10 @@ Sous-livrables :
 ## Anti-patterns à ÉVITER (les sub-agents lisent ça)
 
 1. **Ne PAS** réinventer ce qui existe dans bubble-ops-loop. Le framework existe, tu le COPIES dans le container, tu ne le réécris pas.
-2. **Ne PAS** hardcoder "Joris" / "Rick" / "Morty" / "bubble-internal" dans les templates. Tout doit être paramétrable via .env.
+2. **Ne PAS** hardcoder "{{OPERATOR}}" / "Rick" / "Morty" / "bubble-internal" dans les templates. Tout doit être paramétrable via .env.
 3. **Ne PAS** ajouter de dépendance cloud (S3, Sentry, Datadog, Slack, etc.). Le client a choisi local pour une raison.
 4. **Ne PAS** scope-creep vers "et aussi Gitea, et aussi Prometheus, et aussi…". MVP = juste ce qu'il faut pour que le scénario de RDV ci-dessus marche.
-5. **Ne PAS** essayer de tout faire en 1 sprint. 3 sprints séquentiels, chacun shippable et testable. Le client peut acheter Sprint 1+3 sans Sprint 2 si on n'a pas eu le temps (mode "github-mais-en-mode-privé-vdk888" temporaire).
+5. **Ne PAS** essayer de tout faire en 1 sprint. 3 sprints séquentiels, chacun shippable et testable. Le client peut acheter Sprint 1+3 sans Sprint 2 si on n'a pas eu le temps (mode "github-mais-en-mode-privé-{{GITHUB_OWNER}}" temporaire).
 6. **Ne PAS** négliger la doc opérateur — le client client-final ne va pas lire notre code, il va lire les 3 READMEs. S'ils sont mauvais, on perd le client à la première intervention.
 
 ---
@@ -207,15 +207,15 @@ Si UN SEUL de ces 5 critères n'est pas atteint, c'est pas shippable, retour aux
 
 ---
 
-## Quand demander à Joris avant de poursuivre
+## Quand demander à {{OPERATOR}} avant de poursuivre
 
 Si en cours d'implémentation tu rencontres :
-- Une décision architecturale non couverte par ce doc (ex: "Gitea sidecar ou pas ?" — Joris doit trancher, défaut = git-bare sans UI)
+- Une décision architecturale non couverte par ce doc (ex: "Gitea sidecar ou pas ?" — {{OPERATOR}} doit trancher, défaut = git-bare sans UI)
 - Un trade-off coût/qualité non évident
 - Un test d'acceptation qui semble impossible à atteindre
 - Une dépendance externe qu'on n'avait pas anticipée
 
-→ **Stop. Pose la question à Joris via Rick** (l'orchestrateur). Ne devine pas, ne scope-creep pas. Le coût d'un message Telegram = 30 secondes. Le coût d'une mauvaise décision archi = des heures de refacto.
+→ **Stop. Pose la question à {{OPERATOR}} via Rick** (l'orchestrateur). Ne devine pas, ne scope-creep pas. Le coût d'un message Telegram = 30 secondes. Le coût d'une mauvaise décision archi = des heures de refacto.
 
 ---
 

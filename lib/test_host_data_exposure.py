@@ -29,11 +29,15 @@ ALLOWED_HOST_DATA_KEYS = {
     "secrets_file",
 }
 
-# Field PATTERNS that must NOT appear anywhere in host_data when serialized
+# Field PATTERNS that must NOT appear anywhere in host_data when serialized.
+# NOTE: the contact/host values below are placeholders for the OSS repo. On a
+# dev box these must match the real bubble-internal values in the private
+# bubble-vps-data repo for the negative-needle check to be meaningful — keep
+# them in sync with that repo (these tests skip when the data repo is absent).
 PII_PATTERNS = [
-    "joris@bubbleinvest.fr",  # contact.primary_email
-    "6532205130",              # contact.primary_telegram_user_id
-    "129474747",               # host.provider_server_id
+    "operator@example.com",  # contact.primary_email (placeholder)
+    "100000001",              # contact.primary_telegram_user_id (placeholder)
+    "99999999",               # host.provider_server_id (placeholder)
     "OPENROUTER_API_KEY",      # secret_ref name (sensitive as relationship metadata)
     "TELEGRAM_BOT_TOKEN",      # secret_ref name
     "TAILSCALE_AUTHKEY",       # secret_ref name
@@ -123,7 +127,7 @@ def test_host_data_contains_minimal_identifiers(inventory_module):
     assert host_data["tenant_type"] == "internal"
     assert host_data["ssh_user"] == "claude"
     assert host_data["ssh_port"] == 22
-    assert host_data["ssh_hostname"] == "178.105.77.178"
+    assert host_data["ssh_hostname"] == "203.0.113.10"
 
 
 def test_get_tenant_config_helper_returns_full_config():
@@ -147,8 +151,8 @@ def test_get_tenant_config_helper_returns_full_config():
     cfg = get_tenant_config(MockHost())
     assert cfg.tenant_name == "bubble-internal"
     # Verify the full config IS available via the helper (the whole point)
-    assert cfg.contact.primary_email == "joris@bubbleinvest.fr"
-    assert cfg.host.provider_server_id == "129474747"
+    assert cfg.contact.primary_email == "operator@example.com"
+    assert cfg.host.provider_server_id == "99999999"
     # bubble-internal uses Claude Code subscription, not API key auth
     assert cfg.agent.llm.auth_mode == "claude_code_subscription"
     assert cfg.agent.llm.api_key_secret_ref is None

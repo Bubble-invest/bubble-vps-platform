@@ -6,7 +6,7 @@ What this does, idempotently:
        (mode 0400, root:root). Existing keys are NEVER overwritten.
     3. If /etc/age/key.pub is missing, derives it from the private key.
     4. Copies the pubkey BACK to the operator's data repo at
-       `tenants/<tenant>/box-pubkey.txt` so Joris can append it to
+       `tenants/<tenant>/box-pubkey.txt` so {{OPERATOR}} can append it to
        `.sops.yaml` and run `sops updatekeys` (the manual gate before
        Phase D's second half can run).
 

@@ -8,7 +8,7 @@ likely regression points during refactors.
 
 Run with: python3 -m pytest lib/test_operator_set_keychain_sh.py -v
 
-Joris directive (msg 2823-2825, 2026-05-21): extend skill `auth` with a
+{{OPERATOR}} directive (msg 2823-2825, 2026-05-21): extend skill `auth` with a
 keychain-based primitive for passphrases that must live OUTSIDE the SOPS
 chain (because they protect SOPS itself — bootstrap cycle).
 """

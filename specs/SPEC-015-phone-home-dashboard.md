@@ -14,9 +14,9 @@ Two co-deployed pieces:
 
 1. **Phone-home daemon (per-tenant box):** small periodic process that POSTs telemetry to a central endpoint. NEVER sends data content — only metadata (service-up, disk %, last-Telegram-msg-ts, agent restart count, claude version, etc.). Proves the per-tenant heartbeat pattern that future client boxes will reuse.
 
-2. **Central dashboard (lives on joris-cx33 for now):** receives phone-home POSTs, stores them in a tiny SQLite, exposes a single web view at `http://joris-cx33.tail408dcc.ts.net:3848/` (Tailscale-only — no public internet exposure). For now: just bubble-internal tenant. Multi-tenant rendering when client #1 lands.
+2. **Central dashboard (lives on {{VPS_HOST}} for now):** receives phone-home POSTs, stores them in a tiny SQLite, exposes a single web view at `http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/` (Tailscale-only — no public internet exposure). For now: just bubble-internal tenant. Multi-tenant rendering when client #1 lands.
 
-Together: when you open the dashboard URL from any tailnet device, you see "joris-cx33: green, last heartbeat 30s ago, claude 2.1.131, morty service up 14h, 0 telegram errors today". When client #1 lands, that becomes a row above ours.
+Together: when you open the dashboard URL from any tailnet device, you see "{{VPS_HOST}}: green, last heartbeat 30s ago, claude 2.1.131, morty service up 14h, 0 telegram errors today". When client #1 lands, that becomes a row above ours.
 
 ---
 
@@ -30,7 +30,7 @@ POST `http://<dashboard>/heartbeat` every 5 min, JSON body:
   "tenant_name": "bubble-internal",
   "ts_utc": "2026-05-09T11:30:00Z",
   "host": {
-    "hostname": "joris-cx33",
+    "hostname": "{{VPS_HOST}}",
     "uptime_seconds": 51234,
     "disk_pct_used": 12,
     "memory_pct_used": 23,
@@ -52,7 +52,7 @@ POST `http://<dashboard>/heartbeat` every 5 min, JSON body:
   },
   "tailscale": {
     "online": true,
-    "self_ip": "100.110.56.18"
+    "self_ip": "{{VPS_TAILNET_IP}}"
   },
   "claude_code": {
     "version_installed": "2.1.131",
@@ -109,7 +109,7 @@ StandardError=journal
 
 ## Dashboard implementation
 
-### Lives at: `/home/claude/dashboard/` on joris-cx33
+### Lives at: `/home/claude/dashboard/` on {{VPS_HOST}}
 
 For v1, smallest possible thing that works:
 - **Backend:** single Python file `app.py` using stdlib `http.server` (no Flask, no extra deps)
@@ -144,7 +144,7 @@ Restart=on-failure
 RestartSec=10
 WorkingDirectory=/home/claude/dashboard
 Environment=DB_PATH=/var/lib/bubble-dashboard/heartbeats.db
-Environment=BIND_ADDR=100.110.56.18  # Tailscale IP — bind only on tailnet, NOT 0.0.0.0
+Environment=BIND_ADDR={{VPS_TAILNET_IP}}  # Tailscale IP — bind only on tailnet, NOT 0.0.0.0
 Environment=BIND_PORT=3848
 
 [Install]
@@ -153,7 +153,7 @@ WantedBy=multi-user.target
 
 **Critical:** `BIND_ADDR=<tailscale-ip>` — dashboard listens ONLY on the tailnet interface, not on 0.0.0.0. Cannot be reached via public internet even if UFW were misconfigured. Defense in depth.
 
-**The Tailscale IP changes** — actually it's stable per-device once registered, but we should NOT hardcode `100.110.56.18` in the systemd template. Better: derive at start time via `tailscale ip -4` and pass as env var.
+**The Tailscale IP changes** — actually it's stable per-device once registered, but we should NOT hardcode `{{VPS_TAILNET_IP}}` in the systemd template. Better: derive at start time via `tailscale ip -4` and pass as env var.
 
 Updated `ExecStart`:
 ```
@@ -216,9 +216,9 @@ For dashboard:
 ### Integration test (after deploy)
 
 Manual on the box:
-1. `curl -H "Authorization: Bearer $TOKEN" -X POST http://100.110.56.18:3848/heartbeat -d '{"schema_version": 1, ...}'` → 200
-2. Open `http://joris-cx33.tail408dcc.ts.net:3848/` from operator's Mac → see joris-cx33's row
-3. `curl http://178.105.77.178:3848/` from outside the tailnet → connection refused (proves dashboard NOT exposed to public internet)
+1. `curl -H "Authorization: Bearer $TOKEN" -X POST http://{{VPS_TAILNET_IP}}:3848/heartbeat -d '{"schema_version": 1, ...}'` → 200
+2. Open `http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/` from operator's Mac → see {{VPS_HOST}}'s row
+3. `curl http://{{VPS_IP}}:3848/` from outside the tailnet → connection refused (proves dashboard NOT exposed to public internet)
 4. `systemctl status phone-home.timer` → active, last fired <5 min ago
 5. After 10 min: 2-3 heartbeat rows in the SQLite
 

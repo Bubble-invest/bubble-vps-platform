@@ -93,7 +93,7 @@ telegram_watchdog.apply()
 #    secrets, agent, CVEs, disk/mem, transcript-leak scan, claude version,
 #    hetzner firewall) and posts a summary message to Telegram. Runs after
 #    telegram_watchdog because it shares the same alert-via-direct-curl
-#    pattern + the same chat_id (Joris's primary_telegram_user_id). No-op
+#    pattern + the same chat_id ({{OPERATOR}}'s primary_telegram_user_id). No-op
 #    when cfg.secrets is opt-out (no decrypted env to read the bot token).
 security_audit.apply()
 
@@ -110,7 +110,7 @@ phone_home.apply()
 # 8) Apply the cloud-side wiki sync timer (Phase 5b — SPEC-020).
 #    Reciprocal of the Mac-side wiki-github-sync cron. Every 30 min: pull
 #    --rebase --autostash + commit local dirty + push back to
-#    github.com/vdk888/bubble-shared-wiki. Auth via GITHUB_TOKEN sourced
+#    github.com/example-org/bubble-shared-wiki. Auth via GITHUB_TOKEN sourced
 #    from the runtime env file → GIT_ASKPASS credential helper (token
 #    NEVER in URL or argv). Conflict-abort + Telegram alert on rebase
 #    failure. Runs after phone_home because it shares the same systemd-

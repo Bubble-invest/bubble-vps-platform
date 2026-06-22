@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Fixes:** Step 1 Finding #2 (full tenant.yaml leaks into pyinfra host.data, can appear in shared logs)
 
 ---
@@ -99,7 +99,7 @@ This means:
 
 2. `test_get_tenant_config_helper()` — set up a fake host.data with `tenant_name=bubble-internal`, call `get_tenant_config()`, assert it returns a valid TenantConfig with full fields.
 
-3. `test_host_data_dump_no_pii()` — dump host_data via repr() / json.dumps and grep for "joris@", "6532205130", "129474747". Must not appear.
+3. `test_host_data_dump_no_pii()` — dump host_data via repr() / json.dumps and grep for "{{OPERATOR_EMAIL}}", "{{OPERATOR_CHAT_ID}}", "{{HETZNER_SERVER_ID}}". Must not appear.
 
 4. Re-run all Step 1 tests + the hello-world deploy. Must still pass byte-identically.
 

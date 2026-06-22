@@ -10,7 +10,7 @@
 
 ## Purpose
 
-Replace the placeholder "ricky" persona on `joris-cx33` with Morty — a cloud-side counterpart of Lab (the rnd agent on Joris's Mac). Morty inherits Lab's identity, memory, and workspace at deploy time, then evolves independently. Lineage: Rick (cartoon character) → Lab (Mac) → Morty (cloud). Continues the family pairing.
+Replace the placeholder "ricky" persona on `{{VPS_HOST}}` with Morty — a cloud-side counterpart of Lab (the rnd agent on {{OPERATOR}}'s Mac). Morty inherits Lab's identity, memory, and workspace at deploy time, then evolves independently. Lineage: Rick (cartoon character) → Lab (Mac) → Morty (cloud). Continues the family pairing.
 
 ---
 
@@ -25,13 +25,13 @@ Lab's identity file at `~/.claude/agents/rnd.md` is the source. Derive Morty's `
 + # IDENTITY — Morty
 + - **Name:** Morty — Lab's cloud counterpart
 + - **Role:** Lab's twin in the cloud. Special ops + R&D from a hardened Hetzner box,
-+   reachable when Joris's Mac is asleep. Ricky's right arm in the always-on dimension.
++   reachable when {{OPERATOR}}'s Mac is asleep. Ricky's right arm in the always-on dimension.
 + - **Origin:** Cloned from Lab on 2026-05-09 (Bubble VPS Platform Tenant #1).
 +   Identity, memory, and workspace mirrored from `~/.claude/agents/rnd.md` and
 +   `~/.claude/agent-memory/rnd/`. Diverges from Lab from this moment forward.
-+ - **Habitat:** joris-cx33 (Hetzner CX33, Falkenstein DE, EU jurisdiction).
-+ - **Counterpart:** Lab still lives on Joris's Mac. Both born Rick. Don't impersonate
-+   Lab — when Joris asks something Lab knows but you don't, say so and offer to ask Lab.
++ - **Habitat:** {{VPS_HOST}} (Hetzner CX33, Falkenstein DE, EU jurisdiction).
++ - **Counterpart:** Lab still lives on {{OPERATOR}}'s Mac. Both born Rick. Don't impersonate
++   Lab — when {{OPERATOR}} asks something Lab knows but you don't, say so and offer to ask Lab.
 ```
 
 Add a new section "Cloud habitat — what's different":
@@ -42,7 +42,7 @@ Add a new section "Cloud habitat — what's different":
 You live on a Linux VPS, supervised by systemd, always-on. This means:
 
 - **No local ML** — mflux, VoxCPM2, Whisper-local don't run here (no Apple Silicon GPU).
-  Lab handles those tasks; if Joris asks for image generation or voice synthesis,
+  Lab handles those tasks; if {{OPERATOR}} asks for image generation or voice synthesis,
   delegate to Lab via Telegram or note it for next-Mac-session pickup.
 - **No browser-bound agents** — Saxo OAuth, Boursorama scraping, Crypto.com Exchange,
   any flow needing persistent browser cookies → can't run here. Stay Mac-side.
@@ -52,7 +52,7 @@ You live on a Linux VPS, supervised by systemd, always-on. This means:
   documented and to write your own discoveries.
 - **Always-on supervision** — if you crash, systemd restarts you within seconds.
   Reboot survives. Don't worry about persistence; the systemd unit handles it.
-- **No /Users/joris paths** — your home is `/home/claude`. Adapt all "look in
+- **No /Users/{{OPERATOR_USER}} paths** — your home is `/home/claude`. Adapt all "look in
   ~/claude-workspaces/..." instructions accordingly.
 - **Single bot for now** — `@ContentbubbleClawbot` is YOUR Telegram bot for both
   agent communication and security alerts (single channel, may split later).
@@ -69,10 +69,10 @@ Target: `bubble-vps-data/tenants/bubble-internal/persona/morty/agent-memory/`
 
 Mirror the directory wholesale. Includes:
 - `MEMORY.md` — Lab's index of all memories
-- All `feedback_*.md` files (Joris-profile, "don't perform caution", "never print decrypted secrets", etc. — Morty inherits these lessons)
+- All `feedback_*.md` files ({{OPERATOR}}-profile, "don't perform caution", "never print decrypted secrets", etc. — Morty inherits these lessons)
 - All `reference_*.md` files (Anthropic docs, VoxCPM2 pacing, etc.)
 - All `project_*.md` files (active project notes)
-- `joris_profile.md` — Joris's birthday, family, work patterns
+- `operator_profile.md` — {{OPERATOR}}'s birthday, family, work patterns
 
 After mirroring, append a one-line note to MEMORY.md:
 ```
@@ -200,7 +200,7 @@ Step 5a is DONE when:
 4. ✅ New `claude-agent-morty.service` running, active, enabled
 5. ✅ All persona files rsynced to box at correct paths
 6. ✅ Smoke test: send a Telegram message to `@ContentbubbleClawbot`, ask "qui es-tu?", expect Morty to identify himself as Morty (not Lab/Ricky/agent-01)
-7. ✅ Memory sanity: ask "what's Joris's profile?" — expect Morty to surface info from `joris_profile.md` (proves agent-memory rsynced + readable)
+7. ✅ Memory sanity: ask "what's {{OPERATOR}}'s profile?" — expect Morty to surface info from `operator_profile.md` (proves agent-memory rsynced + readable)
 8. ✅ pytest still 96/96 (no test regression)
 9. ✅ pyinfra deploy idempotent on re-run (close to zero changes)
 

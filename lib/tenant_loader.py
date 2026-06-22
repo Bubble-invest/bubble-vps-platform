@@ -196,7 +196,7 @@ class ConciergeConfig:
             `/home/claude/agents/<name>/workspace/` with files.sync(delete=True)
             — the data repo is canonical for that workdir.
           - GIT-BACKED (CLAUDETTE): the concierge's workdir IS its own git repo
-            (e.g. https://github.com/vdk888/bubble-claudette-workspace.git). Set
+            (e.g. https://github.com/example-org/bubble-claudette-workspace.git). Set
             `workspace_repo` (a git URL) + optional `workspace_branch` (default
             "main"). The deploy CLONES that repo into the workdir
             `/home/claude/agents/<name>` directly (files at top level, NOT under

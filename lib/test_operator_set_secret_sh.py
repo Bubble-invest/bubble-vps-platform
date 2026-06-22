@@ -93,7 +93,7 @@ def test_script_changes_cwd_before_sops_encrypt():
     sops walks UP from the CURRENT WORKING DIRECTORY (not from the file path)
     to find .sops.yaml for `--encrypt --in-place`. The script was originally
     invoked from the platform repo dir and sops couldn't find the data repo's
-    .sops.yaml. Caught a real bug on 2026-05-08 — Joris's second paste failed
+    .sops.yaml. Caught a real bug on 2026-05-08 — {{OPERATOR}}'s second paste failed
     after the env-var-prefix fix because cwd was wrong.
 
     After generalization (2026-05-12), the script uses a unified $SOPS_CWD
@@ -123,7 +123,7 @@ def test_script_changes_cwd_before_sops_encrypt():
     assert encrypt_match is not None, "expected sops --encrypt invocation not found"
     assert cd_idx < encrypt_match.start(), (
         f"cd $SOPS_CWD (idx {cd_idx}) must come BEFORE sops --encrypt "
-        f"(idx {encrypt_match.start()}) — see Joris regression 2026-05-08"
+        f"(idx {encrypt_match.start()}) — see {{OPERATOR}} regression 2026-05-08"
     )
 
 
@@ -134,7 +134,7 @@ def test_python_envvar_pass_through_correctly_prefixed():
     BEFORE or AFTER `cmd`. Before = sets VAR for the subprocess. After = passes
     as a positional arg. The script's python heredoc relies on env vars, so
     the env-var-prefix form MUST appear before `python3`. Caught a real bug
-    on 2026-05-08 — Joris's first paste failed because the env vars came after.
+    on 2026-05-08 — {{OPERATOR}}'s first paste failed because the env vars came after.
     """
     src = SCRIPT.read_text()
     # The env-var prefix should come BEFORE python3:
@@ -150,7 +150,7 @@ def test_python_envvar_pass_through_correctly_prefixed():
         # At least one __DUNDER_VAR__= assignment must precede python3
         assert re.search(r'__[A-Z_]+__\s*=', last_200_before), (
             f"env-var-prefix form must precede python3 invocation at offset "
-            f"{match.start()}; see Joris regressions 2026-05-08"
+            f"{match.start()}; see {{OPERATOR}} regressions 2026-05-08"
         )
 
 

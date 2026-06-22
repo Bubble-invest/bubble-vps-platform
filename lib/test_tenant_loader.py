@@ -84,8 +84,8 @@ def test_load_valid_tenant_internal():
     assert cfg.tenant_name == "bubble-internal"
     assert cfg.tenant_type == "internal"
     assert cfg.display_name == "Bubble Internal"
-    assert cfg.host.ip == "178.105.77.178"
-    assert cfg.host.hostname == "joris-cx33"
+    assert cfg.host.ip == "203.0.113.10"
+    assert cfg.host.hostname == "{{VPS_HOST}}"
     assert cfg.host.ssh_user == "claude"
     assert cfg.host.ssh_port == 22
     assert cfg.host.os_family == "linux"
@@ -96,12 +96,12 @@ def test_load_valid_tenant_internal():
     assert cfg.hardening.sshd.permit_root_login == "no"
     assert cfg.hardening.swap.size_gb == 2
     assert cfg.hardening.hetzner_cloud_firewall is not None
-    assert cfg.hardening.hetzner_cloud_firewall.firewall_id == "10938002"
+    assert cfg.hardening.hetzner_cloud_firewall.firewall_id == "12345678"
     # Step 5a (SPEC-010): persona renamed ricky → morty.
     assert cfg.agent.persona.name == "morty"
     assert cfg.agent.channels.telegram is not None
     assert cfg.agent.channels.telegram.bot_token_secret_ref == "TELEGRAM_BOT_TOKEN"
-    assert cfg.agent.channels.telegram.allowed_user_ids == ["6532205130"]
+    assert cfg.agent.channels.telegram.allowed_user_ids == ["100000001"]
     assert cfg.agent.llm.provider == "anthropic"
     assert cfg.agent.llm.auth_mode == "claude_code_subscription"
     assert cfg.agent.llm.api_key_secret_ref is None
@@ -114,8 +114,8 @@ def test_load_valid_tenant_internal():
     assert cfg.access.tailscale.authkey_secret_ref == "TAILSCALE_AUTHKEY"
     assert cfg.access.phone_home.enabled is True
     assert cfg.access.phone_home.interval_minutes == 5
-    assert cfg.contact.primary_email == "joris@bubbleinvest.fr"
-    assert cfg.contact.primary_telegram_user_id == "6532205130"
+    assert cfg.contact.primary_email == "operator@example.com"
+    assert cfg.contact.primary_telegram_user_id == "100000001"
 
 
 def test_missing_required_field_raises(tmp_path: Path):
@@ -461,7 +461,7 @@ def _git_backed_concierge_yaml() -> str:
           concierges:
             - name: claudette
               persona_dir: persona/claudette
-              workspace_repo: https://github.com/vdk888/bubble-claudette-workspace.git
+              workspace_repo: https://github.com/example-org/bubble-claudette-workspace.git
               channels:
                 telegram: {enabled: true, bot_token_secret_ref: CLAUDETTE_TELEGRAM_BOT_TOKEN, allowed_user_ids: ["2"]}
               llm: {provider: anthropic, auth_mode: claude_code_subscription, model: "opus[1m]"}
@@ -480,7 +480,7 @@ def test_concierge_workspace_repo_parses(tmp_path: Path):
     assert claudette.name == "claudette"
     assert (
         claudette.workspace_repo
-        == "https://github.com/vdk888/bubble-claudette-workspace.git"
+        == "https://github.com/example-org/bubble-claudette-workspace.git"
     )
     assert claudette.workspace_branch == "main"
 
@@ -490,9 +490,9 @@ def test_concierge_workspace_branch_override_parses(tmp_path: Path):
     # NOTE: textwrap.dedent strips the common leading whitespace, so concierge
     # fields land at 6-space indent in the final string — match that here.
     body = _git_backed_concierge_yaml().replace(
-        "workspace_repo: https://github.com/vdk888/bubble-claudette-workspace.git",
+        "workspace_repo: https://github.com/example-org/bubble-claudette-workspace.git",
         (
-            "workspace_repo: https://github.com/vdk888/bubble-claudette-workspace.git\n"
+            "workspace_repo: https://github.com/example-org/bubble-claudette-workspace.git\n"
             "      workspace_branch: develop"
         ),
     )
@@ -515,7 +515,7 @@ def test_concierge_without_workspace_repo_defaults_none(tmp_path: Path):
 def test_concierge_workspace_repo_non_string_raises(tmp_path: Path):
     """workspace_repo must be a string URL when present."""
     body = _git_backed_concierge_yaml().replace(
-        "workspace_repo: https://github.com/vdk888/bubble-claudette-workspace.git",
+        "workspace_repo: https://github.com/example-org/bubble-claudette-workspace.git",
         "workspace_repo: [1, 2, 3]",
     )
     yaml_path = tmp_path / "tenant.yaml"
@@ -578,11 +578,11 @@ def test_bubble_internal_loads_with_claudette_git_backed():
     # claudette is GIT-BACKED.
     assert (
         claudette.workspace_repo
-        == "https://github.com/vdk888/bubble-claudette-workspace.git"
+        == "https://github.com/example-org/bubble-claudette-workspace.git"
     )
     assert claudette.workspace_branch == "main"
     assert claudette.channels.telegram.bot_token_secret_ref == "CLAUDETTE_TELEGRAM_BOT_TOKEN"
-    assert claudette.channels.telegram.allowed_user_ids == ["6532205130", "7470271615"]
+    assert claudette.channels.telegram.allowed_user_ids == ["100000001", "100000002"]
     assert claudette.llm.model == "opus[1m]"
 
 
@@ -610,7 +610,7 @@ def test_secrets_config_parses():
         "PHONEHOME_TOKEN",
         # Added 2026-05-09 for SPEC-020 (Phase 5b — cloud wiki sync).
         # Fine-grained GitHub PAT scoped to Contents R+W on
-        # vdk888/bubble-shared-wiki. Consumed by /home/claude/scripts/
+        # example-org/bubble-shared-wiki. Consumed by /home/claude/scripts/
         # cloud-wiki-sync.sh via the GIT_ASKPASS credential helper.
         "GITHUB_TOKEN",
     ]

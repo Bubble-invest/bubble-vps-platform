@@ -3,7 +3,7 @@
 **Status:** Draft v1.0
 **Author:** Lab (rnd)
 **Date:** 2026-05-08
-**Reviewed by:** _pending Joris approval_
+**Reviewed by:** _pending {{OPERATOR}} approval_
 **Depends on:** SPEC-001 (tenant.yaml schema)
 
 ---
@@ -12,7 +12,7 @@
 
 Define how pyinfra discovers tenants, picks one (or all), connects to their hosts, and runs deploy operations. This is the entry point of every deploy command and must be:
 
-1. **Reusable** — same code works for joris-cx33 and any future client box, distinguished only by tenant.yaml content.
+1. **Reusable** — same code works for {{VPS_HOST}} and any future client box, distinguished only by tenant.yaml content.
 2. **Safe** — explicit `--tenant=<name>` (or `--all`) required. No accidental "deploy to everything by default" footgun.
 3. **Validated** — refuses to start if any tenant.yaml is malformed.
 4. **Inspectable** — `--dry-run` / `--list-hosts` / `--list-operations` work without touching boxes.
@@ -109,9 +109,9 @@ server.shell(
 
 **Verification criteria (Step 1 done when):**
 
-1. ✅ `pyinfra inventory.py deploy.py` with `TENANT=bubble-internal` connects to joris-cx33.
+1. ✅ `pyinfra inventory.py deploy.py` with `TENANT=bubble-internal` connects to {{VPS_HOST}}.
 2. ✅ Output shows `🟢 Connected to tenant: bubble-internal`.
-3. ✅ Hostname reads `joris-cx33`.
+3. ✅ Hostname reads `{{VPS_HOST}}`.
 4. ✅ User reads `claude`.
 5. ✅ Exit code 0.
 6. ✅ No changes to the box (only `server.shell` reads, no installs/edits).
@@ -192,7 +192,7 @@ python3 -c "from lib.tenant_loader import load_tenant_from_path; load_tenant_fro
 ### T4. inventory.py dry-run shows expected hosts
 ```bash
 TENANT=bubble-internal pyinfra inventory.py --dry-run deploy.py
-# Expected: shows joris-cx33 in inventory, exits 0 without connecting
+# Expected: shows {{VPS_HOST}} in inventory, exits 0 without connecting
 ```
 
 ### T5. End-to-end hello world
@@ -200,7 +200,7 @@ TENANT=bubble-internal pyinfra inventory.py --dry-run deploy.py
 TENANT=bubble-internal pyinfra inventory.py deploy.py
 # Expected output includes:
 #   🟢 Connected to tenant: bubble-internal
-#   Hostname: joris-cx33
+#   Hostname: {{VPS_HOST}}
 #   User: claude
 # Exit code: 0
 ```

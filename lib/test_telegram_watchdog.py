@@ -70,7 +70,7 @@ _DEFAULT_RENDER_KWARGS = {
     "bot_pid_file": "/home/claude/.claude/channels/telegram/bot.pid",
     "decrypted_runtime_path": "/run/claude-agent/env",
     "cooldown_seconds": 300,
-    "joris_telegram_user_id": "6532205130",
+    "operator_telegram_user_id": "100000001",
     "last_restart_mark": "/run/telegram-watchdog-morty/last-restart",
     # SPEC-021 FIX-4b: the agent's session-transcript dir (workdir / → -).
     "session_projects_dir": "/home/claude/.claude/projects/-home-claude-agents-morty",
@@ -325,7 +325,7 @@ def test_watchdog_signal6_busy_guard_skips_subagent_and_tool_work():
 
 
 def test_watchdog_recovery_resumes_session_with_continue():
-    """Joris directive 2026-06-01: the auto-restart recovery must RESUME the
+    """{{OPERATOR}} directive 2026-06-01: the auto-restart recovery must RESUME the
     prior session (preserve context) via `--continue --fork-session`, not start
     blank. Mechanism (HARDENED per Codex P1 review): the watchdog calls a
     ROOT-OWNED helper that installs/removes a transient drop-in with FIXED
