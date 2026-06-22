@@ -68,7 +68,7 @@ _DEFAULT_RENDER_KWARGS = {
     "service_name": "claude-agent-morty.service",
     "decrypted_runtime_path": "/run/claude-agent/env",
     "tenant_name": "bubble-internal",
-    "dashboard_url": "http://100.64.0.1:3848/heartbeat",
+    "dashboard_url": "http://127.0.0.1:3848/heartbeat",
     "bot_pid_file": "/home/claude/.claude/channels/telegram/bot.pid",
 }
 

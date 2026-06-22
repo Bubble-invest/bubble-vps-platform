@@ -73,7 +73,7 @@ _BOT_PID_FILE = "/home/claude/.claude/channels/telegram/bot.pid"
 # uses a placeholder tailnet IP so the OSS repo ships no real infra address.
 # Multi-tenant later: derive from a tenant.yaml field once a 2nd tenant exists.
 _DASHBOARD_URL_V1 = os.environ.get(
-    "BUBBLE_DASHBOARD_URL", "http://100.64.0.1:3848/heartbeat"
+    "BUBBLE_DASHBOARD_URL", "http://127.0.0.1:3848/heartbeat"
 )
 
 
