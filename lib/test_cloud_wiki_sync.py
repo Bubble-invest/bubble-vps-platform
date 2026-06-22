@@ -69,11 +69,11 @@ LEAKED_PREFIXES = (
 # bubble-internal. Keep these in sync if the module's defaults change.
 _DEFAULT_RENDER_KWARGS = {
     "wiki_dir": "/home/claude/.claude/agent-memory/shared-wiki",
-    "wiki_remote_url": "https://github.com/vdk888/bubble-shared-wiki",
+    "wiki_remote_url": "https://github.com/example-org/bubble-shared-wiki",
     "lock_dir": "/run/cloud-wiki-sync/lock",
     "credential_helper_path": "/home/claude/scripts/git-credential-helper.sh",
     "decrypted_runtime_path": "/run/claude-agent/env",
-    "joris_telegram_user_id": "{{OPERATOR_CHAT_ID}}",
+    "operator_telegram_user_id": "100000001",
 }
 
 

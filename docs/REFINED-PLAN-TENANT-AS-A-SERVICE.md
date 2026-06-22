@@ -11,9 +11,9 @@
 
 Four findings dominate this refinement:
 
-1. **The roadmap's 14h estimate is optimistic by ~50%.** Honest range: **20–24h**. The gap is hidden test-and-doc work (≥6 existing tests need updating per sprint, each touching ≥2 files), the "dashboard host" hardcode in `pyinfra/tasks/monitoring/dashboard.py:59`, and the "JORIS_TG_USER_ID" naming convention in 3 j2 templates that bleeds into Bubble Cabinet too.
+1. **The roadmap's 14h estimate is optimistic by ~50%.** Honest range: **20–24h**. The gap is hidden test-and-doc work (≥6 existing tests need updating per sprint, each touching ≥2 files), the "dashboard host" hardcode in `pyinfra/tasks/monitoring/dashboard.py:59`, and the "OPERATOR_TG_USER_ID" naming convention in 3 j2 templates that bleeds into Bubble Cabinet too.
 
-2. **Sprint 2 (bubble-ops-loop deployable) is structurally the biggest** because the framework currently lives in `~/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/` and assumes (a) operator-Mac paths, (b) `vdk888` as GitHub org (3 hardcoded references), (c) `/home/claude/agents/morty/` paths in `deploy-to-morty.sh`. A real packaging pass is closer to 6–8h than 4h.
+2. **Sprint 2 (bubble-ops-loop deployable) is structurally the biggest** because the framework currently lives in `~/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/` and assumes (a) operator-Mac paths, (b) `{{GITHUB_OWNER}}` as GitHub org (3 hardcoded references), (c) `/home/claude/agents/morty/` paths in `deploy-to-morty.sh`. A real packaging pass is closer to 6–8h than 4h.
 
 3. **The roadmap is missing a Sprint 0 — "schema additions"** that nearly every other sprint depends on. Adding `tenant.yaml::bubble_admin_keys[]`, `tenant.yaml::owner.{display_name,locale,voice_style}`, `tenant.yaml::access.hosts_dashboard` and `tenant.yaml::billing` IS the unblocking work for Sprints 1, 3, 4 — and it changes `lib/tenant_loader.py` + 18 tests. Doing it once upfront saves rework later.
 
@@ -30,10 +30,10 @@ The strongest re-sequencing argument: **Sprint 0 (schema) + Sprint 1 (persona te
 The original roadmap has no Sprint 0. I'm adding one because every downstream sprint requires schema changes; doing them iteratively means rewriting validation + tests N times.
 
 **Files created/modified:**
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/lib/tenant_loader.py` — add `OwnerConfig`, `BillingConfig`, `BubbleAdminConfig` dataclasses; add `_parse_owner()`, `_parse_billing()`, `_parse_bubble_admin()`; extend `TenantConfig`.
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/specs/SPEC-001-tenant-yaml-schema.md` — bump schema_version to 2; document new blocks.
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/tenant.yaml.j2` — render new placeholders.
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/tenant.yaml` — add the new blocks (backfill bubble-internal as the canonical example).
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/lib/tenant_loader.py` — add `OwnerConfig`, `BillingConfig`, `BubbleAdminConfig` dataclasses; add `_parse_owner()`, `_parse_billing()`, `_parse_bubble_admin()`; extend `TenantConfig`.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/specs/SPEC-001-tenant-yaml-schema.md` — bump schema_version to 2; document new blocks.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/tenant.yaml.j2` — render new placeholders.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/tenant.yaml` — add the new blocks (backfill bubble-internal as the canonical example).
 - New schema doc: `specs/SPEC-021-tenant-yaml-v2-additions.md`.
 
 **Data shapes added to tenant.yaml:**
@@ -98,11 +98,11 @@ access:
 Original estimate: 3h. Refined: **~4h**.
 
 **Files created/modified:**
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-claude-md.j2` (currently a 1-line stub at line 1 — see Read output). Replace with a full templated persona that takes `{owner_display_name, concierge_name, locale, voice_style, telegram_bot_handle}`.
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-workspace-claude-md.j2` (referenced in `new-tenant.sh:242` but I didn't audit it — likely also stub).
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-cwd-claude-md.j2` (NEW — mirror of `bubble-vps-data/tenants/bubble-internal/persona/morty/cwd-CLAUDE.md`, parameterized).
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/new-tenant.sh` — add `--owner-name`, `--owner-locale`, `--voice-style`, `--concierge-name` flags + render the new templates.
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_persona.py` — add a render step before the rsync, so the persona dir on the operator Mac is materialized from template at deploy time too (currently the persona dir is assumed pre-existing; for a fresh tenant scaffolded by new-tenant.sh, this gap is hidden because new-tenant.sh renders the file directly).
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-claude-md.j2` (currently a 1-line stub at line 1 — see Read output). Replace with a full templated persona that takes `{owner_display_name, concierge_name, locale, voice_style, telegram_bot_handle}`.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-workspace-claude-md.j2` (referenced in `new-tenant.sh:242` but I didn't audit it — likely also stub).
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-cwd-claude-md.j2` (NEW — mirror of `bubble-vps-data/tenants/bubble-internal/persona/morty/cwd-CLAUDE.md`, parameterized).
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/new-tenant.sh` — add `--owner-name`, `--owner-locale`, `--voice-style`, `--concierge-name` flags + render the new templates.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_persona.py` — add a render step before the rsync, so the persona dir on the operator Mac is materialized from template at deploy time too (currently the persona dir is assumed pre-existing; for a fresh tenant scaffolded by new-tenant.sh, this gap is hidden because new-tenant.sh renders the file directly).
 
 **Hidden assumptions in existing code that break under templating:**
 - `pyinfra/tasks/agent/_persona.py:9` docstring hardcodes `bubble-internal/persona/morty/` as the canonical example. Cosmetic but worth updating.
@@ -135,7 +135,7 @@ persona-claude-md.j2 receives:
 3. `test_persona_render_voice_style_fr_vouvoiement` (string match: "Bonjour Marie" with "vous")
 4. `test_persona_render_voice_style_fr_tutoiement` (string match: "Salut Marie" with "tu")
 5. `test_persona_render_voice_style_en` (English variant)
-6. `test_persona_render_no_morty_string_leaks` — pin: rendered persona for tenant "acme" must NOT contain "morty", "joris", "Lab", "Ricky", "bubble-internal".
+6. `test_persona_render_no_morty_string_leaks` — pin: rendered persona for tenant "acme" must NOT contain "morty", "{{OPERATOR}}", "Lab", "Ricky", "bubble-internal".
 7. `test_persona_render_telegram_handle_present`
 8. `test_persona_render_tailnet_hostname_present`
 9. `test_persona_render_for_internal_tenant_keeps_kanban_emit` (internal tenants preserve `emit_kanban_item.sh` line).
@@ -149,8 +149,8 @@ persona-claude-md.j2 receives:
 - `lib/test_docs_consistency.py` (5 tests) — verify SPEC-010 still aligns.
 
 **Acceptance criteria:**
-- `./scripts/new-tenant.sh marie --type=client --owner-name="Marie Dupont" --owner-locale=fr --voice-style=vouvoiement --concierge-name=Sandra` produces a `bubble-vps-data/tenants/marie/persona/sandra/` tree with ZERO references to morty/joris/Lab/Ricky/bubble-internal.
-- Grep on the rendered tree: `grep -ri "morty\|joris\|Lab\|Ricky\|bubble-internal" bubble-vps-data/tenants/marie/persona/` returns 0 lines.
+- `./scripts/new-tenant.sh marie --type=client --owner-name="Marie Dupont" --owner-locale=fr --voice-style=vouvoiement --concierge-name=Sandra` produces a `bubble-vps-data/tenants/marie/persona/sandra/` tree with ZERO references to morty/{{OPERATOR}}/Lab/Ricky/bubble-internal.
+- Grep on the rendered tree: `grep -ri "morty\|{{OPERATOR}}\|Lab\|Ricky\|bubble-internal" bubble-vps-data/tenants/marie/persona/` returns 0 lines.
 - All 30+ existing tests still green.
 
 **Risks + mitigations:**
@@ -166,20 +166,20 @@ persona-claude-md.j2 receives:
 Original estimate: 4h. Refined: **~6–7h**. This is the most underestimated sprint.
 
 **Files created/modified:**
-- New: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/deploy.py` — new task module, called from `deploy.py` between agent and access layers.
-- New: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/_install.py` — clone bubble-ops-loop or unpack tarball into `/opt/bubble-ops-loop/` (read-only, root-owned), symlink `/usr/local/bin/bootstrap-dept`, `/usr/local/bin/activate-dept`, etc.
-- New: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/_skills_link.py` — symlink `department-onboarding-guide` into `/home/claude/.claude/skills/` (alongside the persona-shipped skills).
-- Modify: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/bootstrap-dept.sh:102` — change `GITHUB_OWNER="vdk888"` to read from env: `GITHUB_OWNER="${BUBBLE_GITHUB_OWNER:-vdk888}"`.
-- Modify: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/activate-dept.sh:100` — same env-var swap.
-- Modify: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/lib/cancel_eclosion.py:51` — `DEFAULT_GH_ORG = os.environ.get("BUBBLE_GITHUB_OWNER", "vdk888")`.
-- Modify: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/deploy-to-morty.sh` — rename to `deploy-dept-systemd.sh`, parameterize MORTY → `${TENANT_AGENT_USER}/${TENANT_PERSONA_NAME}`. The "do not touch claude-agent-morty.service" doctrine becomes "do not touch claude-agent-${persona}.service".
-- Modify: `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/deploy.py` — add `framework.apply()` call between line 62 (agent) and 68 (tailscale).
+- New: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/deploy.py` — new task module, called from `deploy.py` between agent and access layers.
+- New: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/_install.py` — clone bubble-ops-loop or unpack tarball into `/opt/bubble-ops-loop/` (read-only, root-owned), symlink `/usr/local/bin/bootstrap-dept`, `/usr/local/bin/activate-dept`, etc.
+- New: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/framework/_skills_link.py` — symlink `department-onboarding-guide` into `/home/claude/.claude/skills/` (alongside the persona-shipped skills).
+- Modify: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/bootstrap-dept.sh:102` — change `GITHUB_OWNER="{{GITHUB_OWNER}}"` to read from env: `GITHUB_OWNER="${BUBBLE_GITHUB_OWNER:-{{GITHUB_OWNER}}}"`.
+- Modify: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/activate-dept.sh:100` — same env-var swap.
+- Modify: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/lib/cancel_eclosion.py:51` — `DEFAULT_GH_ORG = os.environ.get("BUBBLE_GITHUB_OWNER", "{{GITHUB_OWNER}}")`.
+- Modify: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/deploy-to-morty.sh` — rename to `deploy-dept-systemd.sh`, parameterize MORTY → `${TENANT_AGENT_USER}/${TENANT_PERSONA_NAME}`. The "do not touch claude-agent-morty.service" doctrine becomes "do not touch claude-agent-${persona}.service".
+- Modify: `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/deploy.py` — add `framework.apply()` call between line 62 (agent) and 68 (tailscale).
 - New: `bubble-ops-loop/RELEASE.md` or `VERSION` file — versioning scheme so the VPS platform can pin a known-good ref.
 
 **Hidden assumptions in bubble-ops-loop that break multi-tenant:**
 - `deploy-to-morty.sh:8` line "DO NOT touch /etc/systemd/system/claude-agent-morty.service" — needs to become parameterized doctrine.
 - `bootstrap-dept.sh:115` line `BOT_HANDLE="bubbleops${SLUG_COMPACT}_bot"` — works fine multi-tenant (it's slug-based), but: the global Telegram namespace is shared. For tenant "acme" eclosing Maya, the handle becomes `bubbleopsmaya_bot` — same as our internal Maya. Collision. **Fix: prefix with tenant**: `bubbleops${TENANT_NAME_COMPACT}_${SLUG_COMPACT}_bot`. Eats into the 32-char limit fast.
-- `scripts/lib/scaffold.py:412` URL hardcodes `vdk888`. Env-var as above.
+- `scripts/lib/scaffold.py:412` URL hardcodes `{{GITHUB_OWNER}}`. Env-var as above.
 - `scripts/lib/scaffold.py:244` references "Karpathy skills repo" GitHub URL — that's fine (it's a citation of an external public repo, not our infra).
 - `bootstrap-dept.sh:188` operator-set-secret invocation hardcodes `--remote-prompt=hetzner` and `--project=/etc/bubble/secrets-${SLUG}.sops.env` — both assumptions specific to our internal layout. Multi-tenant: parameterize via env or detect from the calling context.
 
@@ -197,7 +197,7 @@ Original estimate: 4h. Refined: **~6–7h**. This is the most underestimated spr
 1. `test_framework_install_creates_install_dir`
 2. `test_framework_install_idempotent` (apply twice → no diff)
 3. `test_framework_install_pins_version` (passing a SHA / tag installs that exact version)
-4. `test_bootstrap_dept_respects_env_github_owner` (BUBBLE_GITHUB_OWNER=acme-corp → creates acme-corp/bubble-ops-maya, not vdk888/bubble-ops-maya)
+4. `test_bootstrap_dept_respects_env_github_owner` (BUBBLE_GITHUB_OWNER=acme-corp → creates acme-corp/bubble-ops-maya, not {{GITHUB_OWNER}}/bubble-ops-maya)
 5. `test_bootstrap_dept_telegram_handle_prefixes_tenant` (tenant=acme + slug=maya → handle includes "acme")
 6. `test_bootstrap_dept_handle_length_check_includes_tenant_prefix` (regression: existing test verified ≤32 char limit; verify tenant-prefixed variant)
 7. `test_deploy_dept_systemd_uses_persona_var` (the renamed deploy script)
@@ -206,11 +206,11 @@ Original estimate: 4h. Refined: **~6–7h**. This is the most underestimated spr
 10. `test_e2e_bootstrap_eclosion_against_fresh_tenant` (heaviest — see Sprint 5)
 
 **Existing tests to update:**
-- bubble-ops-loop has its own test suite (location: `bubble-ops-loop/tests/` — TODO: count tests there). Anything that asserts hardcoded "vdk888" or "morty" will need updating. Estimated 5–10 affected tests.
+- bubble-ops-loop has its own test suite (location: `bubble-ops-loop/tests/` — TODO: count tests there). Anything that asserts hardcoded "{{GITHUB_OWNER}}" or "morty" will need updating. Estimated 5–10 affected tests.
 
 **Acceptance criteria:**
 - pyinfra deploy against a fresh tenant box installs `/opt/bubble-ops-loop/scripts/bootstrap-dept.sh` and `/usr/local/bin/bootstrap-dept` symlinks.
-- The concierge (Sandra) running on the box can invoke `bootstrap-dept --slug=maya --display-name="Maya" --owner=marie` and it creates the dept under the tenant's GitHub org (not vdk888).
+- The concierge (Sandra) running on the box can invoke `bootstrap-dept --slug=maya --display-name="Maya" --owner=marie` and it creates the dept under the tenant's GitHub org (not {{GITHUB_OWNER}}).
 - `apt-get autoremove` would not pick up bubble-ops-loop (it's manually installed, not a dpkg) — document the upgrade flow.
 
 **Risks + mitigations:**
@@ -330,7 +330,7 @@ This is the integration sentinel. Honest re-estimate matters here because the te
 - New: `lib/test_fresh_tenant_e2e.py` — unit-level companion that mocks SSH/network to validate the script's flow.
 
 **Test plan (each step is a separately-assertable checkpoint):**
-1. `new-tenant.sh marie --type=client --owner-name="Marie Dupont" --owner-locale=fr --voice-style=vouvoiement --concierge-name=Sandra --owner-telegram=12345` → check tenant dir created, secrets.sops.env encrypted, persona/sandra/CLAUDE.md has no morty/joris/Lab strings.
+1. `new-tenant.sh marie --type=client --owner-name="Marie Dupont" --owner-locale=fr --voice-style=vouvoiement --concierge-name=Sandra --owner-telegram=12345` → check tenant dir created, secrets.sops.env encrypted, persona/sandra/CLAUDE.md has no morty/{{OPERATOR}}/Lab strings.
 2. `provision-tenant.sh marie` → check Hetzner box created (or mocked in CI).
 3. `operator-set-secret.sh --tenant=marie` for each required key.
 4. `./deploy.sh --tenant=marie` → check all 8 layers green (hardening/secrets/agent/tailscale/watchdog/audit/phone-home/wiki-sync) + framework layer (new).
@@ -365,9 +365,9 @@ This is the integration sentinel. Honest re-estimate matters here because the te
 ## 3. Open questions resolved
 
 ### Q1 — GitHub org for tenants' repos
-**Default answer: create a GitHub Organization `bubbleinvest-tenants` NOW; use it for ALL paying clients; keep `vdk888` for internal/test tenants only.**
+**Default answer: create a GitHub Organization `bubbleinvest-tenants` NOW; use it for ALL paying clients; keep `{{GITHUB_OWNER}}` for internal/test tenants only.**
 
-Reasoning: (a) Free Org plan covers unlimited public + 5 private repos — fine for the first 5 paying clients. (b) `vdk888` is {{OPERATOR}}'s personal handle; mixing client deliverables under a personal account is unprofessional and creates an exit problem if {{OPERATOR}} ever leaves Bubble Invest. (c) An Org gives us audit logs + per-team permissions for free. (d) Tenant config can override: `tenant.yaml::framework.github_org: "their-own-org"` for clients that prefer their own GitHub.
+Reasoning: (a) Free Org plan covers unlimited public + 5 private repos — fine for the first 5 paying clients. (b) `{{GITHUB_OWNER}}` is {{OPERATOR}}'s personal handle; mixing client deliverables under a personal account is unprofessional and creates an exit problem if {{OPERATOR}} ever leaves Bubble Invest. (c) An Org gives us audit logs + per-team permissions for free. (d) Tenant config can override: `tenant.yaml::framework.github_org: "their-own-org"` for clients that prefer their own GitHub.
 
 Cost: 30min to create the Org + invite {{OPERATOR}} + Rick. Affects `bootstrap-dept.sh:102` and `activate-dept.sh:100` (both already in Sprint 2 scope). Confidence: HIGH.
 
@@ -416,13 +416,13 @@ Risk: Restic + B2 requires a `RESTIC_REPOSITORY` URL and `B2_ACCOUNT_ID/B2_ACCOU
 
 ### 4.2 Tenant VPS in trouble — concierge alerts us
 - **Status:** PARTIALLY COVERED. The `security_audit` cron (SPEC-014) posts daily to {{OPERATOR}}'s Telegram. The `telegram_watchdog` (SPEC-013) posts on stale heartbeat. The `phone_home` daemon (SPEC-015) reports operational metadata to a central dashboard.
-- **Gap:** None of these alert RICK/JORIS to a CLIENT's VPS in trouble — they alert THE CLIENT'S concierge → the client's owner. Cross-tenant escalation is missing.
+- **Gap:** None of these alert RICK/{{OPERATOR}} to a CLIENT's VPS in trouble — they alert THE CLIENT'S concierge → the client's owner. Cross-tenant escalation is missing.
 - **Proposal:** Add a `bubble_invest_oncall.telegram_chat_id` field in tenant.yaml. The security_audit and telegram_watchdog templates check: on CRITICAL severity (e.g. disk >95%, fail2ban shows persistent attacker), also post to `bubble_invest_oncall.telegram_chat_id`. Default off; tenant opts in (legal/comms reason: "we don't watch you, you watch you" — opt-in flips that).
-- **Hidden assumption:** the templates currently hardcode `JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"` (pyinfra/templates/security-audit.sh.j2:21). Rename in Sprint 0 to `OPERATOR_TG_USER_ID` + add `ONCALL_TG_USER_ID` as 2nd channel.
+- **Hidden assumption:** the templates currently hardcode `OPERATOR_TG_USER_ID="{{ operator_telegram_user_id }}"` (pyinfra/templates/security-audit.sh.j2:21). Rename in Sprint 0 to `OPERATOR_TG_USER_ID` + add `ONCALL_TG_USER_ID` as 2nd channel.
 - **Adds to: NEW Sprint 6.** ~2h.
 
 ### 4.3 Tenant cancellation / self-service decommission
-- **Status:** PARTIALLY COVERED. `offboard-tenant.sh` (Scenario A handoff / Scenario B destroy) exists at `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/offboard-tenant.sh`. It's operator-driven.
+- **Status:** PARTIALLY COVERED. `offboard-tenant.sh` (Scenario A handoff / Scenario B destroy) exists at `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/offboard-tenant.sh`. It's operator-driven.
 - **Gap:** No self-service path. A client who wants to cancel must email {{OPERATOR}}/Rick. Acceptable for v1 (low churn assumption). Not acceptable past 20 clients.
 - **Proposal:** v1 keep manual. v2 (>20 clients): Sandra herself can initiate offboarding via a `concierge_can_offboard` gate policy. The flow becomes: client tells Sandra "I want to cancel" → Sandra confirms with 7-day waiting period → Sandra runs offboard-tenant.sh remotely. This is doable but adds risk surface; NOT for MVP.
 - **Adds to: SPRINT 6 or LATER.** Not needed for first 5 paying clients.
@@ -535,31 +535,31 @@ Five things that, if they don't work, kill T-a-a-S:
 
 For traceability:
 
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/ROADMAP-TENANT-AS-A-SERVICE.md` (147 lines)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/NORTH-STAR-BUBBLE-CABINET.md` (223 lines)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/ARCHITECTURE.md` (skim)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/SECURITY.md` (skim, threat model)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/OFFBOARDING.md` (header)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/deploy.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/inventory.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/lib/tenant_loader.py` (full, ~778 lines)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/deploy.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_persona.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_systemd_unit.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/access/tailscale.py` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/monitoring/dashboard.py` (skim, hardcode confirmation)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/new-tenant.sh` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-claude-md.j2` (stub, 1 line)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/tenant.yaml.j2` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/claude-agent.service.j2` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/tenant.yaml` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/persona/morty/CLAUDE.md` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/persona/morty/cwd-CLAUDE.md` (full)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/bootstrap-dept.sh` (partial: lines 90-200)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/activate-dept.sh` (partial)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/deploy-to-morty.sh` (header)
-- `/Users/joris/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/skills/department-onboarding-guide/SKILL.md` (header)
-- Grep audits for "morty", "joris", "bubble-internal", "vdk888" hardcoding patterns across the pyinfra and bubble-ops-loop trees.
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/ROADMAP-TENANT-AS-A-SERVICE.md` (147 lines)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/NORTH-STAR-BUBBLE-CABINET.md` (223 lines)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/ARCHITECTURE.md` (skim)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/SECURITY.md` (skim, threat model)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/docs/OFFBOARDING.md` (header)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/deploy.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/inventory.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/lib/tenant_loader.py` (full, ~778 lines)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/deploy.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_persona.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/agent/_systemd_unit.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/access/tailscale.py` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/tasks/monitoring/dashboard.py` (skim, hardcode confirmation)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/scripts/new-tenant.sh` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/persona-claude-md.j2` (stub, 1 line)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/tenant.yaml.j2` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-platform/pyinfra/templates/claude-agent.service.j2` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/tenant.yaml` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/persona/morty/CLAUDE.md` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-vps-data/tenants/bubble-internal/persona/morty/cwd-CLAUDE.md` (full)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/bootstrap-dept.sh` (partial: lines 90-200)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/activate-dept.sh` (partial)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/scripts/deploy-to-morty.sh` (header)
+- `/Users/{{OPERATOR_USER}}/claude-workspaces/Rick_RnD/projects/bubble-ops-loop/skills/department-onboarding-guide/SKILL.md` (header)
+- Grep audits for "morty", "{{OPERATOR}}", "bubble-internal", "{{GITHUB_OWNER}}" hardcoding patterns across the pyinfra and bubble-ops-loop trees.
 
 I did NOT read (per the brief mentions): `/tmp/notion_final.txt` (file not opened — could not verify the line citations in the SKILL.md doc; if {{OPERATOR}} wants those validated, ping me). RUNBOOK.md, INSTALL.md, ONBOARDING.md — skimmed via `ls` only, content not used.
 

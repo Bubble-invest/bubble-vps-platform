@@ -21,8 +21,8 @@ Install the Tailscale agent on every tenant box and register it with our tailnet
 
 ## Pre-requisites (from operator side, one-time)
 
-1. **Tailscale account exists** — `{{OPERATOR_USER}}@gmail.com` tailnet `` confirmed
-2. **`tag:bubble-tenant` defined in tailnet ACL** — operator added `"tag:bubble-tenant": ["{{OPERATOR_USER}}@gmail.com"]` to tagOwners
+1. **Tailscale account exists** — `{{OPERATOR_EMAIL}}` tailnet `{{TAILNET}}.ts.net` confirmed
+2. **`tag:bubble-tenant` defined in tailnet ACL** — operator added `"tag:bubble-tenant": ["{{OPERATOR_EMAIL}}"]` to tagOwners
 3. **Reusable + pre-approved + tagged auth key generated** at admin/settings/keys — pasted via `operator-set-secret.sh --key=TAILSCALE_AUTHKEY`
 4. **`TAILSCALE_AUTHKEY` in tenant's secrets.sops.env** — added to `required_keys` in tenant.yaml
 
@@ -177,7 +177,7 @@ Step 6a is DONE when:
 4. ✅ `ssh {{VPS_HOST}}` from operator's Mac succeeds via Tailscale (resolves to 100.x.x.x)
 5. ✅ Box's hostname appears with `tag:bubble-tenant` in admin console
 6. ✅ Re-running pyinfra task is idempotent (zero changes on second deploy)
-7. ✅ Public-IP SSH (`ssh -4 178.105.77.178`) still works as fallback (UFW LIMIT IN remains in place)
+7. ✅ Public-IP SSH (`ssh -4 {{VPS_IP}}`) still works as fallback (UFW LIMIT IN remains in place)
 8. ✅ Tests pass; deploy logs grep clean for `tskey-` and any other secret prefix
 
 ---

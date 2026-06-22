@@ -90,7 +90,7 @@ Currently ~50 lines covering operator setup. Expand to ~200 lines covering:
 
 ## Post-deploy verification (5 min, manual)
 1. Smoke test: send "hello" to the client's Telegram bot, expect a reply
-2. Open dashboard: http://:3848/, see tenant row
+2. Open dashboard: http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/, see tenant row
 3. Check security audit ran on first deploy (or wait for tomorrow 09:00 UTC)
 4. Send client their welcome email with:
    - Their bot's @username

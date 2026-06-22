@@ -110,7 +110,7 @@ phone_home.apply()
 # 8) Apply the cloud-side wiki sync timer (Phase 5b — SPEC-020).
 #    Reciprocal of the Mac-side wiki-github-sync cron. Every 30 min: pull
 #    --rebase --autostash + commit local dirty + push back to
-#    github.com/vdk888/bubble-shared-wiki. Auth via GITHUB_TOKEN sourced
+#    github.com/example-org/bubble-shared-wiki. Auth via GITHUB_TOKEN sourced
 #    from the runtime env file → GIT_ASKPASS credential helper (token
 #    NEVER in URL or argv). Conflict-abort + Telegram alert on rebase
 #    failure. Runs after phone_home because it shares the same systemd-

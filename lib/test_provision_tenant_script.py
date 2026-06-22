@@ -97,11 +97,11 @@ fi
 
 case "$1 $2" in
     "ssh-key list")
-        echo "12345 joris-fake-key"
+        echo "12345 operator-fake-key"
         exit 0
         ;;
     "firewall list")
-        echo "10938002 bubble-default"
+        echo "12345678 bubble-default"
         exit 0
         ;;
     "server list")

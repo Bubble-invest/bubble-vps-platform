@@ -709,7 +709,7 @@ The north-star skipped this. Without it, Sprint 1 starts blind.
   - `test_upgrade_script_rollback_uses_latest_pre_upgrade_snapshot` — rollback restores from the correct snapshot.
   - `test_restore_from_restic_full_volume_recovery` — `down -v` then restore → Sandra resumes.
   - `test_readme_install_renders_as_valid_markdown` — markdownlint passes.
-  - `test_readme_install_has_no_internal_jargon` — greps for "Lab", "Rick", "Morty", "vdk888" — none present.
+  - `test_readme_install_has_no_internal_jargon` — greps for "Lab", "Rick", "Morty", "{{GITHUB_OWNER}}" — none present.
 - **Acceptance criteria**:
   - A DSI who does NOT know bubble-ops-loop can follow README-INSTALL.md end-to-end without calling us.
   - upgrade.sh + rollback.sh are exercised in a manual test (no real v1.1 yet — uses a dummy `v1.0.1` tag for the round-trip).

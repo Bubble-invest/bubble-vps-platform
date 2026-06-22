@@ -61,8 +61,8 @@ test -f bubble-vps-data/tenants/<name>/tenant.yaml || exit 2
 export HCLOUD_TOKEN=$(security find-generic-password -s "hetzner-cloud" -a api_token -w 2>/dev/null)
 [ -z "$HCLOUD_TOKEN" ] && { echo "no hcloud token in keychain"; exit 2; }
 
-# 3. List operator SSH keys, find one to attach (default: first key matching joris-*)
-SSH_KEY_ID=$(hcloud ssh-key list -o noheader -o columns=id,name | grep -i joris | head -1 | awk '{print $1}')
+# 3. List operator SSH keys, find one to attach (default: first key matching $BUBBLE_SSH_KEY_FILTER (default: operator-*))
+SSH_KEY_ID=$(hcloud ssh-key list -o noheader -o columns=id,name | grep -i "${BUBBLE_OPERATOR_USER:-operator}" | head -1 | awk '{print $1}')
 
 # 4. List firewalls, find bubble-default (already exists from Hetzner migration project)
 FIREWALL_ID=$(hcloud firewall list -o noheader -o columns=id,name | grep "bubble-default" | head -1 | awk '{print $1}')
@@ -138,7 +138,7 @@ If a server with the same name already exists, the script:
 - **Does not create the SOPS box pubkey recipient entry** — that's Phase D first-half (pyinfra task `_age_setup` runs on first deploy, generates the box's age keypair, copies pubkey back to operator)
 - **Does not generate the operator master age key** — that's `operator-bootstrap-age.sh`
 - **Does not paste secrets** — operator runs `operator-set-secret.sh` for each
-- **Does not provision Hetzner Cloud Firewall** — the firewall already exists (`bubble-default`, ID 10938002, created during Hetzner migration project). Future tenants just attach to the existing one.
+- **Does not provision Hetzner Cloud Firewall** — the firewall already exists (`bubble-default`, ID {{HETZNER_FIREWALL_ID}}, created during Hetzner migration project). Future tenants just attach to the existing one.
 
 ---
 
@@ -189,7 +189,7 @@ Step 7b done when:
 ## Out of scope
 
 - Multi-region failover
-- Hetzner Cloud Firewall creation (use existing `bubble-default`, ID 10938002)
+- Hetzner Cloud Firewall creation (use existing `bubble-default`, ID {{HETZNER_FIREWALL_ID}})
 - Custom server types beyond cx33 (overridable via flag, but defaults are right for our scale)
 - Image alternatives beyond Ubuntu 24.04 (overridable via flag, but only this is tested)
 - Non-Hetzner providers (AWS/GCP/Azure — would be a separate `provision-aws.sh`, etc.)

@@ -18,8 +18,8 @@ For **Claudette → Morty** + **Miranda → {{OPERATOR_2}}'s Mac** (same recipe)
 2. Agent memory dir (`~/.claude/agent-memory/<name>/`)
 3. Workspace (cloned from GitHub for Claudette; rsync'd for Miranda — 329 MB after excluding node_modules + venv + git objects)
 4. JSONL conversation history (54 files Claudette / 84 files Miranda) with PATH RENAME so Claude Code recognizes them:
-   - Mac source path: `~/.claude/projects/-Users-joris-claude-workspaces-Miranda-Socials/`
-   - Target path: replace `-Users-joris-claude-workspaces-` with the host's `~/claude-workspaces/` rewritten as `-Users-<user>-claude-workspaces-` (Mac) or `-home-claude-agents-` (Linux)
+   - Mac source path: `~/.claude/projects/-Users-{{OPERATOR_USER}}-claude-workspaces-Miranda-Socials/`
+   - Target path: replace `-Users-{{OPERATOR_USER}}-claude-workspaces-` with the host's `~/claude-workspaces/` rewritten as `-Users-<user>-claude-workspaces-` (Mac) or `-home-claude-agents-` (Linux)
 5. Telegram channel config (`~/.claude/channels/telegram-<name>/{access.json, .env}`)
 6. Telegram MCP plugin (`~/.claude/plugins/cache/claude-plugins-official/telegram/0.0.6/`) + entry in `installed_plugins.json` + flag in `settings.json::enabledPlugins`
 7. Trust-dialog acceptance in `~/.claude.json::projects.<cwd>.hasTrustDialogAccepted = true`

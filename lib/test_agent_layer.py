@@ -1080,10 +1080,13 @@ class TestStep5aMortyPersonaArtifacts:
             "MEMORY.md missing the 'Morty fork' note appended per SPEC-010 "
             "§\"Memory inheritance\"."
         )
-        # joris_profile.md must be present (smoke-test acceptance criterion 7
-        # in SPEC-010 — Morty must surface {{OPERATOR}}'s profile on demand).
-        assert (memory_dir / "joris_profile.md").is_file(), (
-            "joris_profile.md not rsynced into Morty's agent-memory."
+        # operator_profile.md must be present (smoke-test acceptance criterion 7
+        # in SPEC-010 — Morty must surface the operator's profile on demand).
+        # NOTE: the actual file lives in the private bubble-vps-data persona
+        # tree; rename it there in lockstep so this data-coupled test (which
+        # skips when the data repo is absent) stays green on a dev box.
+        assert (memory_dir / "operator_profile.md").is_file(), (
+            "operator_profile.md not rsynced into Morty's agent-memory."
         )
 
     def test_morty_workspace_populated(self, morty_dir: Path):
@@ -1357,7 +1360,7 @@ class TestGitBackedConciergeWorkspace:
         concierge = _make_concierge(
             "claudette",
             "persona/claudette",
-            workspace_repo="https://github.com/vdk888/bubble-claudette-workspace.git",
+            workspace_repo="https://github.com/example-org/bubble-claudette-workspace.git",
         )
         return persona, concierge
 
@@ -1385,7 +1388,7 @@ class TestGitBackedConciergeWorkspace:
         )
         assert "git clone" in joined
         assert (
-            "https://github.com/vdk888/bubble-claudette-workspace.git" in joined
+            "https://github.com/example-org/bubble-claudette-workspace.git" in joined
         )
         # Clone target is the workdir directly — NOT under a workspace/ subdir.
         assert "/home/claude/agents/claudette/workspace" not in joined, (
@@ -1506,7 +1509,7 @@ class TestGitBackedConciergeWorkspace:
         concierge = _make_concierge(
             "claudette",
             "persona/claudette",
-            workspace_repo="https://github.com/vdk888/bubble-claudette-workspace.git",
+            workspace_repo="https://github.com/example-org/bubble-claudette-workspace.git",
             workspace_branch="staging",
         )
         cfg = _FakeCfg(str(tmp_path))

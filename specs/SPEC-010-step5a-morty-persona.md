@@ -52,7 +52,7 @@ You live on a Linux VPS, supervised by systemd, always-on. This means:
   documented and to write your own discoveries.
 - **Always-on supervision** — if you crash, systemd restarts you within seconds.
   Reboot survives. Don't worry about persistence; the systemd unit handles it.
-- **No /Users/joris paths** — your home is `/home/claude`. Adapt all "look in
+- **No /Users/{{OPERATOR_USER}} paths** — your home is `/home/claude`. Adapt all "look in
   ~/claude-workspaces/..." instructions accordingly.
 - **Single bot for now** — `@ContentbubbleClawbot` is YOUR Telegram bot for both
   agent communication and security alerts (single channel, may split later).
@@ -72,7 +72,7 @@ Mirror the directory wholesale. Includes:
 - All `feedback_*.md` files ({{OPERATOR}}-profile, "don't perform caution", "never print decrypted secrets", etc. — Morty inherits these lessons)
 - All `reference_*.md` files (Anthropic docs, VoxCPM2 pacing, etc.)
 - All `project_*.md` files (active project notes)
-- `joris_profile.md` — {{OPERATOR}}'s birthday, family, work patterns
+- `operator_profile.md` — {{OPERATOR}}'s birthday, family, work patterns
 
 After mirroring, append a one-line note to MEMORY.md:
 ```
@@ -200,7 +200,7 @@ Step 5a is DONE when:
 4. ✅ New `claude-agent-morty.service` running, active, enabled
 5. ✅ All persona files rsynced to box at correct paths
 6. ✅ Smoke test: send a Telegram message to `@ContentbubbleClawbot`, ask "qui es-tu?", expect Morty to identify himself as Morty (not Lab/Ricky/agent-01)
-7. ✅ Memory sanity: ask "what's {{OPERATOR}}'s profile?" — expect Morty to surface info from `joris_profile.md` (proves agent-memory rsynced + readable)
+7. ✅ Memory sanity: ask "what's {{OPERATOR}}'s profile?" — expect Morty to surface info from `operator_profile.md` (proves agent-memory rsynced + readable)
 8. ✅ pytest still 96/96 (no test regression)
 9. ✅ pyinfra deploy idempotent on re-run (close to zero changes)
 

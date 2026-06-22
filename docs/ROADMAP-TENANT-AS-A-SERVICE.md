@@ -117,7 +117,7 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 
 ## Open questions to resolve before Sprint 1
 
-- **GitHub org for tenants' repos**: `vdk888/` ({{OPERATOR}}'s personal) or a future Bubble Invest org? Impacts the dept repo creation flow in `bootstrap-dept.sh`.
+- **GitHub org for tenants' repos**: `{{GITHUB_OWNER}}/` ({{OPERATOR}}'s personal) or a future Bubble Invest org? Impacts the dept repo creation flow in `bootstrap-dept.sh`.
 - **DNS for client-facing console**: today `tailscale-only` access. Do clients need a public URL (`marie.cabinets.bubbleinvest.com`) or stay Tailscale-only?
 - **Pricing model for paying clients**: bundled VPS + concierge + framework? À la carte? Impacts the `tenant.yaml` schema (`billing` block?).
 - **Concierge model choice**: Opus 4.7 (premium, costs more) or Sonnet 4.5 (cheaper but less reasoning)? Per-tenant choice in `tenant.yaml::agent.llm.model`?
@@ -136,7 +136,7 @@ Each tenant VPS hosts **2 distinct agent layers** that see each other but have d
 1. Maya first onboarding (validates the éclosion flow on `bubble-internal`, semi-clean) — Maya might be tomorrow or whenever {{OPERATOR}} is ready
 2. Hardening sprint P1 from msg 2783 (PermitRootLogin, rotation drill) — 1.5h
 3. **Tenant-as-a-Service sprints 1-5** — ~14h, ideally start AFTER Maya proved the éclosion flow works in real life
-4. Onboard a SECOND tenant (`bubble-internal-jade` or a real `client-xxx`) as the integration test — proves Sprint 5 wasn't lying
+4. Onboard a SECOND tenant (`bubble-internal-{{OPERATOR_2}}` or a real `client-xxx`) as the integration test — proves Sprint 5 wasn't lying
 
 ---
 

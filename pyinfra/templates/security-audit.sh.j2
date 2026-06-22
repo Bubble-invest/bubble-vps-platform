@@ -3,7 +3,7 @@
 # Managed by bubble-vps-platform (SPEC-014). Do not edit by hand.
 #
 # Daily security audit running ON THE BOX. 8 parts, score-based, posts a
-# single summary message to Telegram (chat_id={{ joris_telegram_user_id }}),
+# single summary message to Telegram (chat_id={{ operator_telegram_user_id }}),
 # persists full findings to {{ audit_log_dir }}/audit-<YYYY-MM-DD>.log.
 #
 # SPEC-008 hard rule: TELEGRAM_BOT_TOKEN is read from {{ decrypted_runtime_path }}
@@ -18,7 +18,7 @@ set -uo pipefail   # NOT -e: each part is independent; one failed check
 
 SERVICE="{{ service_name }}"
 ENV_FILE="{{ decrypted_runtime_path }}"
-JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+OPERATOR_TG_USER_ID="{{ operator_telegram_user_id }}"
 AUDIT_LOG_DIR="{{ audit_log_dir }}"
 EXPECTED_BOX_PUBKEY="{{ expected_box_pubkey }}"
 
@@ -494,11 +494,11 @@ else
     if [[ -n "${TOKEN:-}" ]]; then
         curl -s --max-time 15 \
             "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${JORIS_TG_USER_ID}" \
+            --data-urlencode "chat_id=${OPERATOR_TG_USER_ID}" \
             --data-urlencode "text=${MESSAGE}" \
             > /dev/null 2>&1
         unset TOKEN
-        log "posted summary to Telegram chat_id=${JORIS_TG_USER_ID}"
+        log "posted summary to Telegram chat_id=${OPERATOR_TG_USER_ID}"
     else
         unset TOKEN
         log "WARN: no TELEGRAM_BOT_TOKEN in ${ENV_FILE}; skipping Telegram post"

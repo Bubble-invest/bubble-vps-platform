@@ -184,7 +184,7 @@ Sous-livrables :
 2. **Ne PAS** hardcoder "{{OPERATOR}}" / "Rick" / "Morty" / "bubble-internal" dans les templates. Tout doit être paramétrable via .env.
 3. **Ne PAS** ajouter de dépendance cloud (S3, Sentry, Datadog, Slack, etc.). Le client a choisi local pour une raison.
 4. **Ne PAS** scope-creep vers "et aussi Gitea, et aussi Prometheus, et aussi…". MVP = juste ce qu'il faut pour que le scénario de RDV ci-dessus marche.
-5. **Ne PAS** essayer de tout faire en 1 sprint. 3 sprints séquentiels, chacun shippable et testable. Le client peut acheter Sprint 1+3 sans Sprint 2 si on n'a pas eu le temps (mode "github-mais-en-mode-privé-vdk888" temporaire).
+5. **Ne PAS** essayer de tout faire en 1 sprint. 3 sprints séquentiels, chacun shippable et testable. Le client peut acheter Sprint 1+3 sans Sprint 2 si on n'a pas eu le temps (mode "github-mais-en-mode-privé-{{GITHUB_OWNER}}" temporaire).
 6. **Ne PAS** négliger la doc opérateur — le client client-final ne va pas lire notre code, il va lire les 3 READMEs. S'ils sont mauvais, on perd le client à la première intervention.
 
 ---

@@ -77,7 +77,7 @@ hardening:
     swappiness: 10
   hetzner_cloud_firewall:
     enabled: true              # informational — Step 7 manages
-    firewall_id: "10938002"
+    firewall_id: "{{HETZNER_FIREWALL_ID}}"
 ```
 
 ---
@@ -259,7 +259,7 @@ For each sub-module:
 #!/bin/bash
 set -euo pipefail
 
-cd /Users/joris/claude-workspaces/rnd/projects/bubble-vps-platform
+cd /Users/{{OPERATOR_USER}}/claude-workspaces/rnd/projects/bubble-vps-platform
 
 # Run the full hardening task once and capture pyinfra's "Changed" count
 TENANT=bubble-internal pyinfra inventory.py pyinfra/tasks/hardening/linux.py 2>&1 | tee /tmp/hardening-run1.log

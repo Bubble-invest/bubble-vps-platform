@@ -153,7 +153,7 @@ ssh hetzner 'whoami; hostname'
 ```
 
 If that works, pyinfra should too. If not, check `~/.ssh/config` has the
-`hetzner` alias mapping to `claude@178.105.77.178`.
+`hetzner` alias mapping to `claude@{{VPS_IP}}`.
 
 ### "UFW rate-limit blocks my deploy mid-run"
 
@@ -203,7 +203,7 @@ If the watchdog itself has been failing repeatedly, check
 
 ## Dashboard not loading
 
-Symptom: `http://{{VPS_HOST}}.tail<id>.ts.net:3848/` does not load from a
+Symptom: `http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/` does not load from a
 tailnet device.
 
 ```bash
@@ -211,7 +211,7 @@ tailnet device.
 tailscale status | grep {{VPS_HOST}}
 
 # 2. From operator Mac — check the dashboard port responds
-curl -sS -o /dev/null -w "%{http_code}\n" http://{{VPS_HOST}}.tail<id>.ts.net:3848/
+curl -sS -o /dev/null -w "%{http_code}\n" http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/
 
 # 3. SSH to the box and check the service
 ssh {{VPS_HOST}}

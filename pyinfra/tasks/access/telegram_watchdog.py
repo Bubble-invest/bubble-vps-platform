@@ -120,8 +120,8 @@ def apply() -> None:
         # liveness, but couldn't alert. Skip cleanly.
         return
 
-    joris_telegram_user_id = cfg.contact.primary_telegram_user_id
-    if not joris_telegram_user_id:
+    operator_telegram_user_id = cfg.contact.primary_telegram_user_id
+    if not operator_telegram_user_id:
         # Per SPEC-013, the recovery-failure alert needs a chat_id to send
         # to. Without contact.primary_telegram_user_id, the "alert via direct
         # curl" path can't escalate. Bail rather than ship a half-broken
@@ -148,12 +148,12 @@ def apply() -> None:
         _apply_one(
             concierge.name,
             s,
-            joris_telegram_user_id,
+            operator_telegram_user_id,
             is_primary=(i == 0),
         )
 
 
-def _apply_one(persona_name, s, joris_telegram_user_id, *, is_primary: bool) -> None:
+def _apply_one(persona_name, s, operator_telegram_user_id, *, is_primary: bool) -> None:
     """Render + lifecycle one concierge's persona-suffixed watchdog stack."""
     service_name = agent_service_name(persona_name)
 
@@ -223,7 +223,7 @@ def _apply_one(persona_name, s, joris_telegram_user_id, *, is_primary: bool) -> 
         bot_pid_file=bot_pid_file,
         decrypted_runtime_path=decrypted_runtime_path,
         cooldown_seconds=_COOLDOWN_SECONDS,
-        joris_telegram_user_id=joris_telegram_user_id,
+        operator_telegram_user_id=operator_telegram_user_id,
         last_restart_mark=last_restart_mark,
         session_projects_dir=session_projects_dir,
         # CLAUDE-OWNED target (/home/claude/scripts/...) → escalate to claude so

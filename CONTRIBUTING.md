@@ -36,7 +36,7 @@ Thanks for your interest in contributing! This document covers all Bubble Invest
 ## Security
 
 If you find a security vulnerability, please **do not** open a public issue.
-Email joris@bubbleinvest.com instead.
+Email {{OPERATOR_EMAIL}} instead.
 
 ## License
 

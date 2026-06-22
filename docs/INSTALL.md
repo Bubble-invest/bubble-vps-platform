@@ -139,7 +139,7 @@ cd -
 
 # 8. Smoke test
 #    Send "hello" to the tenant's Telegram bot — expect a reply within ~5s.
-#    Open http://{{VPS_HOST}}.tail<id>.ts.net:3848/ — expect a row for acme-corp
+#    Open http://{{VPS_HOST}}.{{TAILNET}}.ts.net:3848/ — expect a row for acme-corp
 #    showing green / heartbeat / agent uptime.
 ```
 

@@ -70,7 +70,7 @@ _DEFAULT_RENDER_KWARGS = {
     "bot_pid_file": "/home/claude/.claude/channels/telegram/bot.pid",
     "decrypted_runtime_path": "/run/claude-agent/env",
     "cooldown_seconds": 300,
-    "joris_telegram_user_id": "{{OPERATOR_CHAT_ID}}",
+    "operator_telegram_user_id": "100000001",
     "last_restart_mark": "/run/telegram-watchdog-morty/last-restart",
     # SPEC-021 FIX-4b: the agent's session-transcript dir (workdir / → -).
     "session_projects_dir": "/home/claude/.claude/projects/-home-claude-agents-morty",

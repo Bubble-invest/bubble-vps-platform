@@ -12,7 +12,7 @@
 
 Mirror the Mac-side `wiki-github-sync` cron pattern on the cloud box. Morty needs:
 
-1. **Initial clone:** `git clone https://github.com/vdk888/bubble-shared-wiki` into `/home/claude/.claude/agent-memory/shared-wiki/` on the box (matches Mac-side path)
+1. **Initial clone:** `git clone https://github.com/{{GITHUB_OWNER}}/bubble-shared-wiki` into `/home/claude/.claude/agent-memory/shared-wiki/` on the box (matches Mac-side path)
 2. **Periodic sync:** every 30 min, `git pull --rebase --autostash` to receive Lab's edits + commit any Morty edits + push back
 3. **Auth:** uses the GITHUB_TOKEN env var from the systemd EnvironmentFile (already injected — Phase D + secrets layer hands it to the agent process). For git pull/push, we configure git's credential helper to use the token via HTTPS basic auth (the canonical pattern for fine-grained PATs).
 
@@ -33,7 +33,7 @@ Worst-case end-to-end latency: ~60 min (depends on cron alignment). Acceptable f
 └────┬──────────────────────┘
      │ git push/pull
      ▼
-┌─ GitHub: vdk888/bubble-shared-wiki ┐
+┌─ GitHub: {{GITHUB_OWNER}}/bubble-shared-wiki ┐
 └────┬──────────────────────────────┘
      │ git push/pull
      ▼
@@ -131,7 +131,7 @@ Operations:
            "  test -n \"$TOKEN\" || { echo 'GITHUB_TOKEN missing in env file'; exit 1; }; "
            "  mkdir -p /home/claude/.claude/agent-memory; "
            "  cd /home/claude/.claude/agent-memory; "
-           "  git clone https://x-access-token:$TOKEN@github.com/vdk888/bubble-shared-wiki shared-wiki; "
+           "  git clone https://x-access-token:$TOKEN@github.com/{{GITHUB_OWNER}}/bubble-shared-wiki shared-wiki; "
            "  unset TOKEN; "
            ")"
        ],
@@ -147,7 +147,7 @@ Operations:
        commands=[
            "test -d /home/claude/.claude/agent-memory/shared-wiki/.git || ("
            "  cd /home/claude/.claude/agent-memory; "
-           "  git clone https://github.com/vdk888/bubble-shared-wiki shared-wiki && "
+           "  git clone https://github.com/{{GITHUB_OWNER}}/bubble-shared-wiki shared-wiki && "
            "  cd shared-wiki && "
            "  git config credential.helper '!f() { echo \"username=x-access-token\"; echo \"password=$GITHUB_TOKEN\"; }; f'; "
            ")"
@@ -193,7 +193,7 @@ Mode 0750 owner claude:claude. The script doesn't echo the token to stdout in a 
 - Script captures into `$TOKEN` shell var, never echoes
 - Git's credential helper reads `$GITHUB_TOKEN` from env at request time — token never persisted to `.git/config`
 - For initial clone: GIT_ASKPASS pattern keeps token out of URL
-- The wiki repo URL (`https://github.com/vdk888/bubble-shared-wiki`) is public-style and contains no auth info
+- The wiki repo URL (`https://github.com/{{GITHUB_OWNER}}/bubble-shared-wiki`) is public-style and contains no auth info
 - Telegram alert on conflict: bot token captured from env, used in HTTPS curl URL (brief ps exposure — same trade-off as Telegram-watchdog, acceptable for ops alerts)
 
 ---
@@ -224,7 +224,7 @@ Goldens at `lib/golden/access/cloud-wiki-sync.{timer,service}`.
 
 After deploy:
 1. `ssh hetzner 'sudo -u claude ls -la /home/claude/.claude/agent-memory/shared-wiki/' | head -10` → wiki tree present
-2. `ssh hetzner 'sudo -u claude git -C /home/claude/.claude/agent-memory/shared-wiki/ remote -v'` → origin matches `vdk888/bubble-shared-wiki`
+2. `ssh hetzner 'sudo -u claude git -C /home/claude/.claude/agent-memory/shared-wiki/ remote -v'` → origin matches `{{GITHUB_OWNER}}/bubble-shared-wiki`
 3. `ssh hetzner 'systemctl is-active cloud-wiki-sync.timer'` → active
 4. `ssh hetzner 'sudo systemctl start cloud-wiki-sync.service; sudo journalctl -u cloud-wiki-sync.service -n 5 --no-pager'` → "ok" log
 5. **Bidirectional smoke test** (skip — costs Mac/cloud round-trip, accept on the next cron tick)

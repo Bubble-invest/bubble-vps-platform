@@ -76,7 +76,7 @@ LEAKED_PREFIXES = (
 _DEFAULT_RENDER_KWARGS = {
     "service_name": "claude-agent-morty.service",
     "decrypted_runtime_path": "/run/claude-agent/env",
-    "joris_telegram_user_id": "{{OPERATOR_CHAT_ID}}",
+    "operator_telegram_user_id": "100000001",
     "audit_log_dir": "/var/log/bubble-security",
     "expected_box_pubkey": "age1examplepubkeyfortestonly000000000000000000000000000000000",
 }

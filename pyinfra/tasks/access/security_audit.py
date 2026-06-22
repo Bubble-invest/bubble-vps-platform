@@ -114,8 +114,8 @@ def apply() -> None:
         return
     decrypted_runtime_path = s.decrypted_runtime_path
 
-    joris_telegram_user_id = cfg.contact.primary_telegram_user_id
-    if not joris_telegram_user_id:
+    operator_telegram_user_id = cfg.contact.primary_telegram_user_id
+    if not operator_telegram_user_id:
         # Per SPEC-014 reporting contract, the summary needs a chat_id to
         # send to. Without contact.primary_telegram_user_id, bail rather
         # than ship a half-broken audit.
@@ -167,7 +167,7 @@ def apply() -> None:
         # Template variables (jinja2):
         service_name=service_name,
         decrypted_runtime_path=decrypted_runtime_path,
-        joris_telegram_user_id=joris_telegram_user_id,
+        operator_telegram_user_id=operator_telegram_user_id,
         audit_log_dir=_AUDIT_LOG_DIR,
         expected_box_pubkey=expected_box_pubkey,
         # CLAUDE target: script lives under /home/claude, owned claude:claude.

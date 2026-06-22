@@ -18,7 +18,7 @@ BOT_PID_FILE="{{ bot_pid_file }}"
 ENV_FILE="{{ decrypted_runtime_path }}"
 LAST_RESTART_MARK="{{ last_restart_mark }}"
 COOLDOWN_SECONDS={{ cooldown_seconds }}
-JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+OPERATOR_TG_USER_ID="{{ operator_telegram_user_id }}"
 # Session-transcript dir for THIS agent (workdir with / → -). The 401 auth
 # probe tails the newest jsonl here. See SPEC-021 invariant #4.
 SESSION_PROJECTS_DIR="{{ session_projects_dir }}"
@@ -293,7 +293,7 @@ if [[ $auth_failed -eq 1 ]]; then
     TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
     if [[ -n "${TOKEN:-}" ]]; then
         curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            -d chat_id="${JORIS_TG_USER_ID}" \
+            -d chat_id="${OPERATOR_TG_USER_ID}" \
             -d text="telegram-watchdog: ${SERVICE} AUTH 401 — agent needs re-auth (claude login / refresh token). A restart won't help; NOT restarting. Detected at $(ts)." \
             > /dev/null
     fi
@@ -369,7 +369,7 @@ log "recovery FAILED — alerting via direct curl"
 TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
 if [[ -n "${TOKEN:-}" ]]; then
     curl -s --max-time 10 "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-        -d chat_id="${JORIS_TG_USER_ID}" \
+        -d chat_id="${OPERATOR_TG_USER_ID}" \
         -d text="telegram-watchdog: ${SERVICE} plugin broken (${reason}). Auto-restart at $(ts) didn't recover. Manual investigation needed." \
         > /dev/null
 fi

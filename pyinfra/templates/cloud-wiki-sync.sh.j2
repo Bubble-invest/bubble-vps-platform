@@ -27,7 +27,7 @@ WIKI_REMOTE_URL="{{ wiki_remote_url }}"
 LOCK_DIR="{{ lock_dir }}"
 CREDENTIAL_HELPER="{{ credential_helper_path }}"
 ENV_FILE="{{ decrypted_runtime_path }}"
-JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+OPERATOR_TG_USER_ID="{{ operator_telegram_user_id }}"
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { logger -t cloud-wiki-sync "$*"; }
@@ -138,7 +138,7 @@ if [[ "$GIT_PULL_RC" -ne 0 ]]; then
         BOT_TOKEN=$(awk -F= '/^TELEGRAM_BOT_TOKEN=/{print $2; exit}' "$ENV_FILE" 2>/dev/null)
         if [[ -n "${BOT_TOKEN:-}" ]]; then
             curl -s --max-time 10 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-                -d chat_id="${JORIS_TG_USER_ID}" \
+                -d chat_id="${OPERATOR_TG_USER_ID}" \
                 -d text="cloud-wiki-sync: rebase conflict at $(ts) on $(hostname -s). Manual resolution needed in ${WIKI_DIR}. Check journalctl -u cloud-wiki-sync.service." \
                 > /dev/null 2>&1 || log "telegram alert failed — non-fatal"
         fi

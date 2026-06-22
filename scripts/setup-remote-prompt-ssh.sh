@@ -26,7 +26,7 @@ REMOTE_HOST="${1:-}"
 if [[ -z "$REMOTE_HOST" ]]; then
     echo "Usage: $0 <remote-host>"
     echo "Example: $0 {{OPERATOR_2_HOST}}"
-    echo "         $0 jade@{{OPERATOR_2_HOST}}"
+    echo "         $0 {{OPERATOR_2_USER}}@{{OPERATOR_2_HOST}}"
     exit 2
 fi
 

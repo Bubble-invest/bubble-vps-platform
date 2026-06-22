@@ -10,7 +10,7 @@ set -uo pipefail
 
 LOG_DIR="{{ wiki_compile_log_dir }}"
 ENV_FILE="{{ decrypted_runtime_path }}"
-JORIS_TG_USER_ID="{{ joris_telegram_user_id }}"
+OPERATOR_TG_USER_ID="{{ operator_telegram_user_id }}"
 MAX_AGE_SEC={{ max_age_sec }}
 LOG_TAG="wiki-compile-freshness"
 
@@ -48,6 +48,6 @@ MSG="🟠 wiki-compile may be STALE
 ${detail}
 (nightly transcript mining → shared wiki). Check cloud-wiki-compile-compile.timer."
 curl -s --max-time 10 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-     -d chat_id="${JORIS_TG_USER_ID}" --data-urlencode text="$MSG" >/dev/null 2>&1 \
+     -d chat_id="${OPERATOR_TG_USER_ID}" --data-urlencode text="$MSG" >/dev/null 2>&1 \
     && log "stale alert sent" || log "warn — telegram alert curl failed (non-fatal)"
 exit 0

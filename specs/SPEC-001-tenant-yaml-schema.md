@@ -52,12 +52,12 @@ tenant_name: bubble-internal               # REQUIRED, lowercase-kebab. Matches 
 tenant_type: internal                       # REQUIRED. Enum: internal | client
 display_name: Bubble Internal               # REQUIRED. Human-readable.
 contact:                                    # REQUIRED for type=client, optional for internal
-  primary_email: joris@bubbleinvest.fr
+  primary_email: {{OPERATOR_EMAIL}}
   primary_telegram_user_id: "{{OPERATOR_CHAT_ID}}"
 
 # ─── Infrastructure ─────────────────────────────────────────────────
 host:
-  ip: 178.105.77.178                        # REQUIRED. IPv4.
+  ip: {{VPS_IP}}                        # REQUIRED. IPv4.
   hostname: {{VPS_HOST}}                      # REQUIRED. Used for SSH alias generation.
   ssh_user: claude                          # REQUIRED. The user pyinfra connects as.
   ssh_port: 22                              # OPTIONAL. Default 22.
@@ -65,7 +65,7 @@ host:
   os_distro: ubuntu                         # REQUIRED for linux. Enum: ubuntu | debian
   os_version: "24.04"                       # REQUIRED for linux.
   provider: hetzner                         # REQUIRED. Enum: hetzner | aws | gcp | byo
-  provider_server_id: "129474747"           # OPTIONAL. For Hetzner-API-driven cleanup.
+  provider_server_id: "{{HETZNER_SERVER_ID}}"           # OPTIONAL. For Hetzner-API-driven cleanup.
   region: fsn1-dc14                         # OPTIONAL. Provider-specific.
 
 # ─── Hardening profile ─────────────────────────────────────────────
@@ -93,7 +93,7 @@ hardening:
     swappiness: 10
   hetzner_cloud_firewall:
     enabled: true
-    firewall_id: "10938002"                 # OPTIONAL but recommended.
+    firewall_id: "{{HETZNER_FIREWALL_ID}}"                 # OPTIONAL but recommended.
 
 # ─── Agent configuration ───────────────────────────────────────────
 agent:

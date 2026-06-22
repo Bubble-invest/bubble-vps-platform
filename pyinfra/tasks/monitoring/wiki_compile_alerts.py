@@ -82,8 +82,8 @@ def apply() -> None:
         return
     decrypted_runtime_path = s.decrypted_runtime_path
 
-    joris_telegram_user_id = cfg.contact.primary_telegram_user_id
-    if not joris_telegram_user_id:
+    operator_telegram_user_id = cfg.contact.primary_telegram_user_id
+    if not operator_telegram_user_id:
         return
 
     # 1. /home/claude/scripts/ exists (claude-owned)
@@ -99,7 +99,7 @@ def apply() -> None:
         src=str(_ALERT_SH_TPL), dest=_ALERT_SH, mode="0755",
         user="claude", group="claude",
         decrypted_runtime_path=decrypted_runtime_path,
-        joris_telegram_user_id=joris_telegram_user_id,
+        operator_telegram_user_id=operator_telegram_user_id,
         _sudo=True, _sudo_user="claude",
     )
     files.template(
@@ -107,7 +107,7 @@ def apply() -> None:
         src=str(_FRESH_SH_TPL), dest=_FRESH_SH, mode="0755",
         user="claude", group="claude",
         decrypted_runtime_path=decrypted_runtime_path,
-        joris_telegram_user_id=joris_telegram_user_id,
+        operator_telegram_user_id=operator_telegram_user_id,
         wiki_compile_log_dir=_WIKI_COMPILE_LOG_DIR, max_age_sec=_MAX_AGE_SEC,
         _sudo=True, _sudo_user="claude",
     )

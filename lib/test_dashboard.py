@@ -125,17 +125,20 @@ def test_dashboard_binds_to_tailscale_ip_via_envfile():
         "exposes the dashboard on every interface including the public "
         "WAN. Per SPEC-015, derive from `tailscale ip -4` instead."
     )
-    # Allow the literal Tailscale IP only inside comments (anchored to # on the
-    # same line). Outside comments it must be the variable.
+    # Allow a literal Tailscale CGNAT IP ({{INTERNAL_IP}}/10) only inside comments
+    # (anchored to # on the same line). Outside comments it must be the
+    # variable derived at start time from `tailscale ip -4`.
+    cgnat_re = re.compile(
+        r"100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d{1,3}\.\d{1,3}"
+    )
     bad_lines = [
         line for line in rendered.splitlines()
-        if "{{INTERNAL_IP}}" in line and not line.lstrip().startswith("#")
+        if cgnat_re.search(line) and not line.lstrip().startswith("#")
     ]
     assert not bad_lines, (
-        f"bubble-dashboard.service hardcodes the {{VPS_HOST}} tailnet IP "
-        f"{{INTERNAL_IP}} OUTSIDE a comment: {bad_lines!r}. The unit must "
-        f"derive at start time so re-registration doesn't strand it on a "
-        f"dead IP."
+        f"bubble-dashboard.service hardcodes a tailnet (CGNAT) IP OUTSIDE a "
+        f"comment: {bad_lines!r}. The unit must derive at start time so "
+        f"re-registration doesn't strand it on a dead IP."
     )
 
 
