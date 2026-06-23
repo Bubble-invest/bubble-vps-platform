@@ -1,4 +1,4 @@
-# Morty GitHub wrappers — bubble-gh + bubble-git
+# VPS GitHub wrappers — bubble-gh + bubble-git
 
 **Path:** `/usr/local/bin/bubble-gh`, `/usr/local/bin/bubble-git` (both root:root 0755)
 **Installed:** 2026-05-25
