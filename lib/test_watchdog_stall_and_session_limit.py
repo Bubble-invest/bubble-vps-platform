@@ -182,3 +182,56 @@ def test_session_limit_probe_runs_even_when_not_broken():
         "session-limit turn masquerades as healthy, so a probe gated behind "
         "broken would never run (the Claudette bug)."
     )
+
+
+# ─── F1 regression: midnight-wrap reset classifier (deterministic) ───────────
+#
+# The VPS classifier is byte-identical to the Mac one. We extract its Python
+# heredoc from the rendered script and drive it with an injected `now`, proving
+# the midnight-wrap fix independent of when the suite runs.
+
+import subprocess as _sp
+import textwrap as _tw
+from datetime import datetime as _dtmod, timezone as _tz
+
+
+def _extract_reset_classifier(rendered: str) -> str:
+    start = rendered.index("sl_reset_passed=$(python3 - \"$sl_reset_raw\" <<'PY'")
+    body_start = rendered.index("\n", start) + 1
+    body_end = rendered.index("\nPY\n", body_start)
+    return rendered[body_start:body_end]
+
+
+def _classify(reset_clock: str, now_utc) -> int:
+    body = _extract_reset_classifier(_render())
+    harness = _tw.dedent(f"""\
+        import sys, datetime as _dt
+        class _FrozenDT(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return _dt.datetime({now_utc.year},{now_utc.month},{now_utc.day},
+                                    {now_utc.hour},{now_utc.minute},tzinfo=_dt.timezone.utc)
+        _dt.datetime = _FrozenDT
+        sys.argv = ["x", {reset_clock!r}]
+    """) + body
+    out = _sp.run(["python3", "-c", harness], capture_output=True, text=True, timeout=15)
+    return int((out.stdout or "0").strip() or "0")
+
+
+def test_f1_near_midnight_future_reset_is_alert_only():
+    """F1 BLOCKER (reviewer counterexample): now=23:55, reset=12:10am is +15min
+    FUTURE (tomorrow 00:10). Old same-day classifier read it as ~23h PAST →
+    restart while the limit is active. Nearest-occurrence must classify FUTURE."""
+    now = _dtmod(2026, 7, 2, 23, 55, tzinfo=_tz.utc)
+    assert _classify("12:10am", now) == 0, (
+        "near-midnight future reset must be alert-only (0), not restart (1) — F1."
+    )
+
+
+def test_f1_classifier_key_cases():
+    UTC = _tz.utc
+    assert _classify("5:10pm", _dtmod(2026, 7, 2, 17, 55, tzinfo=UTC)) == 1  # passed 45m
+    assert _classify("5:10pm", _dtmod(2026, 7, 2, 16, 30, tzinfo=UTC)) == 0  # future 40m
+    assert _classify("12:10am", _dtmod(2026, 7, 3, 0, 20, tzinfo=UTC)) == 1  # passed 10m
+    assert _classify("5:10pm", _dtmod(2026, 7, 2, 17, 10, tzinfo=UTC)) == 0  # exact→conservative
+    assert _classify("11:55pm", _dtmod(2026, 7, 3, 0, 5, tzinfo=UTC)) == 1   # passed 10m (yest)
