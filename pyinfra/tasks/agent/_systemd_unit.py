@@ -148,6 +148,12 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
         restart=sysd.restart,
         restart_sec=sysd.restart_sec,
         nofile_limit=sysd.nofile_limit,
+        # Boot re-arm (#590). None for any concierge that doesn't set
+        # systemd.boot_inject_message in tenant.yaml → the {% if %} block
+        # in the template renders nothing, byte-identical to today (no
+        # churn on morty's golden unit).
+        boot_inject_message=sysd.boot_inject_message,
+        boot_inject_delay_sec=sysd.boot_inject_delay_sec,
         # The deploy connects AS the claude user (tenant ssh_user: claude).
         # /etc/systemd/system/ is root-owned (user="root" target above), so we
         # MUST escalate to root to write it — `_sudo=True` with NO `_sudo_user`

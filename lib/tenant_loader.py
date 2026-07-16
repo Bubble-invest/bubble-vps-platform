@@ -165,6 +165,21 @@ class AgentSystemdConfig:
     restart: str = "on-failure"
     restart_sec: int = 10
     nofile_limit: int = 65536
+    # Boot re-arm (board card #590). None (default) → no ExecStartPost inject
+    # block is rendered at all, so morty's golden unit and any concierge that
+    # doesn't opt in stay byte-identical to today. When set, the concierge's
+    # Telegram-plugin `inject` file watcher receives this exact text on every
+    # service (re)start (after a fixed settle delay — see
+    # boot_inject_delay_sec), the same delivery primitive the ops-loop dept
+    # units use for their boot-inject.conf drop-ins, but with content this
+    # concierge can actually act on (it has no dept.yaml/OODA loop to resume).
+    boot_inject_message: Optional[str] = None
+    # Seconds to sleep before writing the inject line, so the Telegram
+    # plugin's file-watcher is up before the message lands (mirrors the dept
+    # ops-loop-<dept>.service.d/boot-inject.conf `sleep 8` — see PR #590 body
+    # for why 8s was chosen there). Only meaningful when boot_inject_message
+    # is set.
+    boot_inject_delay_sec: int = 8
 
 
 @dataclass
@@ -631,10 +646,50 @@ def _parse_systemd(systemd_d: Optional[Any], where: str) -> AgentSystemdConfig:
     """Parse a `systemd:` mapping (all fields optional with defaults)."""
     systemd_d = systemd_d or {}
     systemd_d = _ensure_dict(systemd_d, where)
+    boot_inject_message = systemd_d.get("boot_inject_message")
+    if boot_inject_message is not None:
+        if not isinstance(boot_inject_message, str) or boot_inject_message.strip() == "":
+            raise TenantConfigError(
+                f"{where}.boot_inject_message must be a non-empty string, "
+                f"got {boot_inject_message!r}"
+            )
+        # Rendered into a single-quoted printf argv (see boot-inject.sh.j2).
+        # A literal single quote would break out of that quoting, so we
+        # reject it at parse time rather than trying to escape it silently.
+        if "'" in boot_inject_message:
+            raise TenantConfigError(
+                f"{where}.boot_inject_message must not contain a single "
+                f"quote (') — it is rendered inside a single-quoted shell "
+                f"argument; got {boot_inject_message!r}"
+            )
+        # systemd specifier escaping (Codex P1, discovered via ops-loop-ben's
+        # boot-inject.conf being broken since 2026-06-27 — board card filed):
+        # systemd expands `%` specifiers (e.g. %h, %n, %s) in ANY Exec*= line
+        # BEFORE the shell runs. The template already double-escapes its OWN
+        # literal `%%s` printf format so systemd's pass collapses it back to
+        # a literal `%s` for sh/printf — but that only protects the format
+        # string the template writes, not arbitrary text a caller supplies.
+        # A `%` anywhere inside boot_inject_message would sit inside the same
+        # Exec*= line and get run through systemd's specifier expansion too,
+        # so we reject it outright rather than trying to double-escape
+        # caller-controlled text.
+        if "%" in boot_inject_message:
+            raise TenantConfigError(
+                f"{where}.boot_inject_message must not contain a percent "
+                f"sign (%) — the message is rendered inside a systemd Exec*= "
+                f"line, and systemd expands % specifiers there BEFORE the "
+                f"shell runs (proven live on ops-loop-ben's boot-inject.conf: "
+                f"an unescaped %s was expanded to '/usr/bin/bash', silently "
+                f"dropping the injected message); got {boot_inject_message!r}"
+            )
     return AgentSystemdConfig(
         restart=str(systemd_d.get("restart", "on-failure")),
         restart_sec=int(systemd_d.get("restart_sec", 10)),
         nofile_limit=int(systemd_d.get("nofile_limit", 65536)),
+        boot_inject_message=(
+            None if boot_inject_message is None else str(boot_inject_message)
+        ),
+        boot_inject_delay_sec=int(systemd_d.get("boot_inject_delay_sec", 8)),
     )
 
 
