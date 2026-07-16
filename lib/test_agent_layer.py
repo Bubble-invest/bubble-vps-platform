@@ -709,6 +709,35 @@ def test_boot_inject_writes_to_concierges_own_inject_file():
     assert msg in rendered
     assert "sleep 8 &&" in rendered, "default delay must be 8s (matches dept boot-inject.conf)"
     assert "ExecStartPost=/bin/sh -c" in rendered
+    # systemd specifier escaping (Codex P1, evidence 2026-06-27 — see
+    # test_boot_inject_message_rejects_percent_sign below for the full story):
+    # the on-disk unit must carry a DOUBLED %%s so systemd's own specifier
+    # expansion pass (which runs BEFORE sh/printf ever sees the line) collapses
+    # it to a literal %s. A bare, unescaped %s here would prove the same bug
+    # that broke ops-loop-ben's boot-inject.conf.
+    # Scope this check to the actual ExecStartPost= LINE, not the whole
+    # rendered unit — the template's own explanatory comment block (a few
+    # lines above) quotes the BUGGY unescaped form ("printf '%s\n'") as an
+    # example of the ops-loop-ben failure, so a whole-file substring search
+    # for that bare form would always find a (harmless, prose) match there
+    # and can never distinguish "comment mentions the bug" from "the actual
+    # Exec line still has the bug".
+    exec_post_lines = [
+        ln for ln in rendered.splitlines() if ln.strip().startswith("ExecStartPost=")
+    ]
+    assert exec_post_lines, "expected an ExecStartPost= line when boot_inject_message is set"
+    exec_post_line = exec_post_lines[0]
+    assert "printf '%%s\\n'" in exec_post_line, (
+        "the rendered ExecStartPost line must carry the DOUBLED %%s, not a "
+        "bare %s — systemd expands % specifiers in Exec*= lines before the "
+        "shell runs, and a bare %s here would collapse to garbage / drop "
+        "the message, exactly as observed on ops-loop-ben since 2026-06-27."
+    )
+    assert "'%s\\n'" not in exec_post_line, (
+        "found a bare, un-doubled %s immediately inside the printf argv on "
+        "the ACTUAL ExecStartPost line — this is the exact ops-loop-ben "
+        "failure mode (systemd eats the %s before sh/printf ever runs)."
+    )
 
 
 def test_boot_inject_delay_is_configurable():
@@ -726,7 +755,7 @@ def test_boot_inject_delay_is_configurable():
 
 def test_boot_inject_message_rejects_embedded_single_quote():
     """The message is rendered inside a single-quoted printf argv
-    (`printf '%s\\n' '<message>'`), so a literal single quote in the message
+    (`printf '%%s\\n' '<message>'`), so a literal single quote in the message
     would break out of that quoting. Reject at parse time (tenant_loader),
     not silently mis-render at deploy time."""
     with pytest.raises(TenantConfigError, match="single quote"):
@@ -736,6 +765,34 @@ def test_boot_inject_message_rejects_embedded_single_quote():
 def test_boot_inject_message_rejects_empty_string():
     with pytest.raises(TenantConfigError, match="non-empty"):
         _parse_systemd_for_test({"boot_inject_message": "   "})
+
+
+def test_boot_inject_message_rejects_percent_sign():
+    """systemd expands `%` specifiers (%h, %n, %s, ...) in ANY Exec*= line
+    BEFORE the shell ever runs it — this is a systemd parsing rule, not a
+    shell/printf one, so it applies to a `%` anywhere in the Exec*= line,
+    including inside caller-supplied text like boot_inject_message.
+
+    Evidence (2026-06-27, discovered via code review of this PR): the dept
+    boot-inject.conf drop-ins this feature mirrors (ops-loop-ben/maya/tony)
+    have been silently broken since they were deployed — `systemctl show
+    ops-loop-ben -p ExecStartPost` shows the on-disk unit's unescaped
+    `printf '%s\n' '<message>'` captured by systemd AS
+    `printf '/usr/bin/bash\n' '<message>'`: systemd's specifier expansion ate
+    the `%s`, and `printf` with a literal (non-format) first arg just prints
+    that arg and ignores the rest — the actual message is silently dropped.
+    13 garbage '/usr/bin/bash' inject turns are in ben's transcripts as a
+    result. A board card was filed for the fleet-wide dept-side fix; this
+    template ships the escaped (%%s) form from day one and additionally
+    refuses to accept a message containing a bare % at all, since a message
+    with its own % (e.g. mentioning a systemd specifier or a literal percent)
+    would reintroduce the same failure mode even with the template's own %%s
+    escaped correctly.
+    """
+    with pytest.raises(TenantConfigError, match="percent sign"):
+        _parse_systemd_for_test(
+            {"boot_inject_message": "re-arm mail_brief_0832 (100% certain)"}
+        )
 
 
 def _parse_systemd_for_test(systemd_d: dict):

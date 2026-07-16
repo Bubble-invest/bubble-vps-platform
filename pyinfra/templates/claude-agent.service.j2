@@ -146,7 +146,21 @@ LimitNOFILE={{ nofile_limit }}
 # inject firing, and this does NOT promote the concierge to the fully
 # durable dept-watchdog-backed pattern. See PR #590 body for the 3-option
 # architecture decision this repairs option 2 of, without foreclosing 1 or 3.
-ExecStartPost=/bin/sh -c "sleep {{ boot_inject_delay_sec | default(8) }} && printf '%s\n' '{{ boot_inject_message }}' >> {{ telegram_state_dir }}/inject"
+#
+# systemd specifier escaping (Codex P1, discovered via ops-loop-ben's
+# boot-inject.conf being broken since 2026-06-27): systemd expands `%`
+# specifiers in ANY Exec*= line BEFORE the shell ever runs — `%s` there is
+# NOT a printf format spec, it's systemd's own specifier syntax (e.g. `%h`
+# home dir, `%n` unit name), and an unrecognized one like `%s` collapses to
+# empty/garbage. `systemctl show ops-loop-ben -p ExecStartPost` proved this
+# live: the on-disk `printf '%s\n' '<message>'` was captured by systemd as
+# `printf '/usr/bin/bash\n' '<message>'` — `%s` got eaten, `printf` then
+# printed its own argv[0]-ish literal and DROPPED the message entirely. Fix:
+# emit a DOUBLED `%%s` here so systemd's specifier pass collapses it to a
+# literal `%s` by the time sh/printf sees it. boot_inject_message itself is
+# rejected at parse time if it contains a bare `%` (see _parse_systemd) so a
+# message can never reintroduce an unescaped specifier.
+ExecStartPost=/bin/sh -c "sleep {{ boot_inject_delay_sec | default(8) }} && printf '%%s\n' '{{ boot_inject_message }}' >> {{ telegram_state_dir }}/inject"
 {% endif %}
 # Decrypted env file is removed when service stops — defense in depth even
 # though /run is tmpfs.

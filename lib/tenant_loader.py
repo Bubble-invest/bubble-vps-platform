@@ -662,6 +662,26 @@ def _parse_systemd(systemd_d: Optional[Any], where: str) -> AgentSystemdConfig:
                 f"quote (') — it is rendered inside a single-quoted shell "
                 f"argument; got {boot_inject_message!r}"
             )
+        # systemd specifier escaping (Codex P1, discovered via ops-loop-ben's
+        # boot-inject.conf being broken since 2026-06-27 — board card filed):
+        # systemd expands `%` specifiers (e.g. %h, %n, %s) in ANY Exec*= line
+        # BEFORE the shell runs. The template already double-escapes its OWN
+        # literal `%%s` printf format so systemd's pass collapses it back to
+        # a literal `%s` for sh/printf — but that only protects the format
+        # string the template writes, not arbitrary text a caller supplies.
+        # A `%` anywhere inside boot_inject_message would sit inside the same
+        # Exec*= line and get run through systemd's specifier expansion too,
+        # so we reject it outright rather than trying to double-escape
+        # caller-controlled text.
+        if "%" in boot_inject_message:
+            raise TenantConfigError(
+                f"{where}.boot_inject_message must not contain a percent "
+                f"sign (%) — the message is rendered inside a systemd Exec*= "
+                f"line, and systemd expands % specifiers there BEFORE the "
+                f"shell runs (proven live on ops-loop-ben's boot-inject.conf: "
+                f"an unescaped %s was expanded to '/usr/bin/bash', silently "
+                f"dropping the injected message); got {boot_inject_message!r}"
+            )
     return AgentSystemdConfig(
         restart=str(systemd_d.get("restart", "on-failure")),
         restart_sec=int(systemd_d.get("restart_sec", 10)),
