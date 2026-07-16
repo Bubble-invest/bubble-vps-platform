@@ -48,7 +48,7 @@ AGENT_TASKS_DIR = REPO_ROOT / "pyinfra" / "tasks" / "agent"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from lib.tenant_loader import load_tenant  # noqa: E402
+from lib.tenant_loader import TenantConfigError, load_tenant  # noqa: E402
 
 
 # Literal credential prefixes that MUST NOT leak into any rendered template.
@@ -350,6 +350,8 @@ def _render_systemd_for_bubble_internal(cfg) -> str:
         restart=sysd.restart,
         restart_sec=sysd.restart_sec,
         nofile_limit=sysd.nofile_limit,
+        boot_inject_message=sysd.boot_inject_message,
+        boot_inject_delay_sec=sysd.boot_inject_delay_sec,
     )
 
 
@@ -464,6 +466,8 @@ def _render_systemd_for_concierge(
     runtime_env_dir: str,
     decrypted_runtime_path: str,
     telegram_state_dir: str | None = None,
+    boot_inject_message: str | None = None,
+    boot_inject_delay_sec: int = 8,
 ) -> str:
     """Render the agent unit for an arbitrary concierge with an explicit
     bot_token_secret_ref. Mirrors the kwargs _systemd_unit._apply_one passes."""
@@ -489,6 +493,8 @@ def _render_systemd_for_concierge(
         restart="on-failure",
         restart_sec=10,
         nofile_limit=65536,
+        boot_inject_message=boot_inject_message,
+        boot_inject_delay_sec=boot_inject_delay_sec,
     )
 
 
@@ -643,6 +649,112 @@ def test_nonprimary_remap_preserves_0400_chown_hardening():
     )
     assert "/bin/chmod 0400 /run/claude-agent-claudette/env" in rendered
     assert "/bin/chown claude:claude /run/claude-agent-claudette/env" in rendered
+
+
+# ─── Boot re-arm ExecStartPost inject (board card #590) ────────────────────────
+#
+# Claudette's critical crons (e.g. mail_brief_0832, a session-scoped CronCreate
+# entry — she has no dept.yaml/OODA loop to fall back on, per her own
+# vps-scheduling-architecture memory) silently vanish on every service restart.
+# This mirrors the DELIVERY PRIMITIVE the bubble-ops-loop dept units use for
+# their boot-inject.conf drop-ins (ExecStartPost sleeps for the Telegram
+# plugin's file-watcher to be ready, then appends a message to the concierge's
+# own `inject` file) — but with concierge-appropriate CONTENT (re-arm named
+# crons via CronCreate), not the dept OODA-resume wording, since Claudette has
+# no dept.yaml cadence to resume. Opt-in via tenant.yaml systemd.boot_inject_message
+# so morty (and any concierge that doesn't set it) renders byte-identical to
+# today — see test_primary_concierge_unit_is_byte_identical_to_golden above.
+
+
+def test_boot_inject_absent_by_default_no_churn():
+    """A concierge that does NOT set boot_inject_message must render with NO
+    ExecStartPost inject line at all — confirms the opt-in default (None)
+    produces zero diff vs. today's units for morty and any not-yet-migrated
+    concierge."""
+    rendered = _render_systemd_for_concierge(
+        persona_name="claudette",
+        bot_token_secret_ref="CLAUDETTE_TELEGRAM_BOT_TOKEN",
+        runtime_env_dir="/run/claude-agent-claudette",
+        decrypted_runtime_path="/run/claude-agent-claudette/env",
+    )
+    assert "inject" not in rendered, (
+        "boot_inject_message defaults to None — no ExecStartPost inject line "
+        "should be rendered unless a concierge explicitly opts in."
+    )
+
+
+def test_boot_inject_writes_to_concierges_own_inject_file():
+    """When boot_inject_message is set, the ExecStartPost line must append to
+    THIS concierge's own inject file (never another concierge's — e.g.
+    claudette's message must land in telegram-claudette/inject, not morty's
+    bare telegram/inject)."""
+    from lib.host_helpers import telegram_channel_dir
+
+    msg = (
+        "re-arm your critical scheduled tasks via CronCreate (at minimum "
+        "mail_brief_0832); run CronList first and dedupe; do not create any "
+        "other new crons."
+    )
+    rendered = _render_systemd_for_concierge(
+        persona_name="claudette",
+        bot_token_secret_ref="CLAUDETTE_TELEGRAM_BOT_TOKEN",
+        runtime_env_dir="/run/claude-agent-claudette",
+        decrypted_runtime_path="/run/claude-agent-claudette/env",
+        telegram_state_dir=telegram_channel_dir("claudette"),
+        boot_inject_message=msg,
+    )
+    assert (
+        ">> /home/claude/.claude/channels/telegram-claudette/inject" in rendered
+    ), "boot-inject must append to claudette's OWN inject file, never morty's."
+    assert msg in rendered
+    assert "sleep 8 &&" in rendered, "default delay must be 8s (matches dept boot-inject.conf)"
+    assert "ExecStartPost=/bin/sh -c" in rendered
+
+
+def test_boot_inject_delay_is_configurable():
+    """boot_inject_delay_sec overrides the default 8s settle delay."""
+    rendered = _render_systemd_for_concierge(
+        persona_name="claudette",
+        bot_token_secret_ref="CLAUDETTE_TELEGRAM_BOT_TOKEN",
+        runtime_env_dir="/run/claude-agent-claudette",
+        decrypted_runtime_path="/run/claude-agent-claudette/env",
+        boot_inject_message="re-arm mail_brief_0832 via CronCreate",
+        boot_inject_delay_sec=12,
+    )
+    assert "sleep 12 &&" in rendered
+
+
+def test_boot_inject_message_rejects_embedded_single_quote():
+    """The message is rendered inside a single-quoted printf argv
+    (`printf '%s\\n' '<message>'`), so a literal single quote in the message
+    would break out of that quoting. Reject at parse time (tenant_loader),
+    not silently mis-render at deploy time."""
+    with pytest.raises(TenantConfigError, match="single quote"):
+        _parse_systemd_for_test({"boot_inject_message": "don't do that"})
+
+
+def test_boot_inject_message_rejects_empty_string():
+    with pytest.raises(TenantConfigError, match="non-empty"):
+        _parse_systemd_for_test({"boot_inject_message": "   "})
+
+
+def _parse_systemd_for_test(systemd_d: dict):
+    from lib.tenant_loader import _parse_systemd
+
+    return _parse_systemd(systemd_d, "agent.concierges[0].systemd")
+
+
+def test_boot_inject_message_parses_and_defaults_delay():
+    cfg = _parse_systemd_for_test(
+        {"boot_inject_message": "re-arm mail_brief_0832 via CronCreate"}
+    )
+    assert cfg.boot_inject_message == "re-arm mail_brief_0832 via CronCreate"
+    assert cfg.boot_inject_delay_sec == 8
+
+
+def test_boot_inject_message_defaults_to_none():
+    cfg = _parse_systemd_for_test({})
+    assert cfg.boot_inject_message is None
 
 
 # ─── Per-concierge TELEGRAM_STATE_DIR export (SPEC-021 finding, multi-box) ─────
