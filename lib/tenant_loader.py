@@ -704,6 +704,24 @@ def _validate_inject_message(message: str, field_name: str, where: str) -> None:
             f"%s was expanded to '/usr/bin/bash', silently dropping the "
             f"injected message); got {message!r}"
         )
+    # The message is rendered as a single Exec*= line in the systemd unit
+    # (board card #744). An embedded newline or carriage return would inject
+    # a literal extra line into the rendered .service file, corrupting the
+    # unit — reject it at parse time rather than letting it reach the render.
+    if "\n" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a newline (\\n) — "
+            f"the message is rendered as a single Exec*= line in the "
+            f"systemd unit, and an embedded newline would inject a literal "
+            f"extra line, corrupting the unit; got {message!r}"
+        )
+    if "\r" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a carriage return (\\r) — "
+            f"the message is rendered as a single Exec*= line in the "
+            f"systemd unit, and an embedded carriage return would corrupt "
+            f"the rendered unit; got {message!r}"
+        )
 
 
 def _parse_systemd(systemd_d: Optional[Any], where: str) -> AgentSystemdConfig:

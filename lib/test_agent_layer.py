@@ -795,6 +795,33 @@ def test_boot_inject_message_rejects_percent_sign():
         )
 
 
+def test_boot_inject_message_rejects_embedded_newline():
+    """The message is rendered as a single line inside a systemd Exec*= entry
+    (`printf '%%s\\n' '<message>' >> .../inject`); an embedded newline would
+    inject a literal extra line into the rendered .service unit, corrupting
+    it (board card #744)."""
+    with pytest.raises(TenantConfigError, match="newline"):
+        _parse_systemd_for_test(
+            {"boot_inject_message": "re-arm mail_brief_0832\nEvilExecStart=/bin/rm -rf /"}
+        )
+
+
+def test_boot_inject_message_rejects_embedded_carriage_return():
+    """Same corruption risk as an embedded newline — a bare \\r would also
+    land inside the rendered Exec*= line (board card #744)."""
+    with pytest.raises(TenantConfigError, match="carriage return"):
+        _parse_systemd_for_test({"boot_inject_message": "re-arm mail_brief_0832\rmore"})
+
+
+def test_boot_inject_message_still_accepts_normal_single_line_value():
+    """A normal single-line message must still pass — the newline/CR guard
+    (#744) must not reject ordinary text."""
+    cfg = _parse_systemd_for_test(
+        {"boot_inject_message": "re-arm mail_brief_0832 via CronCreate"}
+    )
+    assert cfg.boot_inject_message == "re-arm mail_brief_0832 via CronCreate"
+
+
 def _parse_systemd_for_test(systemd_d: dict):
     from lib.tenant_loader import _parse_systemd
 
@@ -1054,6 +1081,31 @@ def test_recovery_ping_message_rejects_percent_sign():
         _parse_systemd_for_test(
             {"recovery_ping_message": "De retour (100% ok)"}
         )
+
+
+def test_recovery_ping_message_rejects_embedded_newline():
+    """Same corruption risk as boot_inject_message (#744) — both fields go
+    through the same shared _validate_inject_message guard."""
+    with pytest.raises(TenantConfigError, match="newline"):
+        _parse_systemd_for_test(
+            {"recovery_ping_message": "De retour\nEvilExecStart=/bin/rm -rf /"}
+        )
+
+
+def test_recovery_ping_message_rejects_embedded_carriage_return():
+    """Same corruption risk as boot_inject_message (#744) — both fields go
+    through the same shared _validate_inject_message guard."""
+    with pytest.raises(TenantConfigError, match="carriage return"):
+        _parse_systemd_for_test({"recovery_ping_message": "De retour\rplus"})
+
+
+def test_recovery_ping_message_still_accepts_normal_single_line_value():
+    """A normal single-line message must still pass — the newline/CR guard
+    (#744) must not reject ordinary text."""
+    cfg = _parse_systemd_for_test(
+        {"recovery_ping_message": "De retour en ligne, tout va bien."}
+    )
+    assert cfg.recovery_ping_message == "De retour en ligne, tout va bien."
 
 
 def test_recovery_ping_message_parses_and_defaults():
