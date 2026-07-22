@@ -814,6 +814,319 @@ def test_boot_inject_message_defaults_to_none():
     assert cfg.boot_inject_message is None
 
 
+# ─── Recovery self-announce ExecStartPost/ExecStopPost pair (board card #691) ──
+#
+# Claudette's service restarts several times/day (Restart=on-failure on heavy/
+# budget session exits + occasional watchdog restarts). Each restart leaves a
+# ~30-60s window where the Telegram poller is reconnecting and she can't
+# answer. She does not self-announce recovery, so an operator (Jade,
+# 2026-07-16) who messages her mid-window gets silence and assumes she's
+# down — when she's healthy seconds later. Fix: on a RESTART (not a fresh
+# first boot), ping the operator chat via the SAME inject-file delivery
+# primitive the boot-rearm block (#590) uses. Opt-in via tenant.yaml
+# systemd.recovery_ping_message so morty (and any concierge that doesn't set
+# it) renders byte-identical to today.
+#
+# DEBOUNCE: a /run marker file (inside runtime_env_dir, touched by
+# ExecStopPost on every stop, checked-for-recency + consumed by
+# ExecStartPost), NOT systemd's Active/InactiveEnterTimestamp — verified live
+# against claude-agent-claudette.service (2026-07-22) that
+# InactiveEnterTimestamp stays EMPTY across Restart=on-failure auto-restarts,
+# making it an unreliable restart signal on this fleet.
+
+
+def _render_lenient(template_name: str, **kwargs) -> str:
+    """Same as _render but with jinja2's default (non-strict) Undefined.
+
+    PRE-EXISTING, out-of-#691-scope repo bug: claude-agent.service.j2 lines
+    26/37/115 (and cron-failure-alert.sh.j2 / cloud-wiki-sync.sh.j2 /
+    deploy.py comments elsewhere) contain literal `{{OPERATOR}}` / `{{VPS_HOST}}`
+    PROSE placeholders inside a real .j2 template — Jinja tries to resolve
+    them as variables no caller ever supplies. This was already broken on
+    `main` before this PR (verified
+    2026-07-22: `git stash` + rerun shows the SAME 19 pre-existing failures,
+    including test_systemd_unit_template_matches_golden, with or without
+    this PR's diff) — it is not something #691 introduced or should silently
+    absorb-fix. _render()'s StrictUndefined makes every template render that
+    reaches line 26 raise, which would otherwise make 100% of THIS PR's new
+    recovery-ping tests uncollectable false negatives. _render_lenient lets
+    an undefined OPERATOR resolve to "" (matching pyinfra's own default
+    Undefined behavior, NOT StrictUndefined, so this also matches what the
+    REAL deploy does) so these tests can actually exercise the recovery-ping
+    logic. See board card #691 PR body for the filed follow-up on the
+    {{OPERATOR}} leak itself.
+    """
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)), keep_trailing_newline=True)
+    return env.get_template(template_name).render(**kwargs)
+
+
+def _render_systemd_with_recovery(
+    *,
+    persona_name: str = "claudette",
+    recovery_ping_message: str | None = None,
+    recovery_ping_delay_sec: int | None = None,
+    recovery_debounce_sec: int = 120,
+    recovery_marker_path: str | None = None,
+    boot_inject_message: str | None = None,
+) -> str:
+    from lib.host_helpers import telegram_channel_dir
+
+    is_primary = persona_name == "morty"
+    # Mirrors _systemd_unit.py's real path derivation: the primary keeps the
+    # historical BARE /run/claude-agent (no -<persona> suffix) and its ref is
+    # the plugin-expected TELEGRAM_BOT_TOKEN verbatim (no remap branch);
+    # non-primary concierges get their own /run/claude-agent-<persona> +
+    # <PERSONA>_TELEGRAM_BOT_TOKEN ref.
+    rt_dir = "/run/claude-agent" if is_primary else f"/run/claude-agent-{persona_name}"
+    rt_file = f"{rt_dir}/env"
+    bot_token_ref = "TELEGRAM_BOT_TOKEN" if is_primary else "CLAUDETTE_TELEGRAM_BOT_TOKEN"
+    if recovery_marker_path is None:
+        recovery_marker_path = f"{rt_dir}/recovery-last-stop"
+
+    return _render_lenient(
+        "claude-agent.service.j2",
+        persona_name=persona_name,
+        tenant_name="bubble-internal",
+        age_key_path="/etc/age/key.txt",
+        encrypted_file_path="/etc/bubble/secrets.sops.env",
+        decrypted_runtime_path=rt_file,
+        runtime_env_dir=rt_dir,
+        bot_token_secret_ref=bot_token_ref,
+        telegram_state_dir=telegram_channel_dir(persona_name),
+        sops_bin="/usr/local/bin/sops",
+        claude_bin="/usr/bin/claude",
+        channels="plugin:telegram@claude-plugins-official",
+        restart="on-failure",
+        restart_sec=10,
+        nofile_limit=65536,
+        boot_inject_message=boot_inject_message,
+        boot_inject_delay_sec=8,
+        recovery_ping_message=recovery_ping_message,
+        recovery_ping_delay_sec=recovery_ping_delay_sec,
+        recovery_debounce_sec=recovery_debounce_sec,
+        recovery_marker_path=recovery_marker_path,
+    )
+
+
+def test_recovery_ping_absent_by_default_no_churn():
+    """A concierge that does NOT set recovery_ping_message must render with
+    NO extra ExecStartPost/ExecStopPost pair — confirms the opt-in default
+    (None) produces zero diff, same guarantee as boot_inject_message."""
+    rendered = _render_systemd_with_recovery(recovery_ping_message=None)
+    assert "recovery-last-stop" not in rendered
+    assert "De retour" not in rendered and "de retour" not in rendered
+
+
+def test_recovery_ping_does_not_disturb_boot_inject_absent_golden():
+    """morty (recovery_ping_message unset, boot_inject_message unset) must
+    still render byte-identical to the golden — the new {% if %} block must
+    not touch the primary's unit at all.
+
+    Compares via _render_lenient (see its docstring for the pre-existing,
+    out-of-#691-scope {{OPERATOR}}/{{VPS_HOST}} literal-placeholder landmines
+    inside this template) against the golden with those SAME placeholders
+    resolved the same way (Jinja's default Undefined stringifies an
+    undefined var to ""), so this still proves byte-for-byte equivalence on
+    every line #691 could plausibly have touched — it just doesn't also
+    re-litigate the pre-existing bug.
+    """
+    rendered = _render_systemd_with_recovery(
+        persona_name="morty",
+        recovery_ping_message=None,
+        boot_inject_message=None,
+    )
+    expected = (
+        _golden("claude-agent-morty.service")
+        .replace("{{OPERATOR}}", "")
+        .replace("{{VPS_HOST}}", "")
+    )
+    assert rendered == expected
+
+
+def test_recovery_ping_writes_to_concierges_own_inject_file():
+    """When recovery_ping_message is set, the ExecStartPost line must append
+    to THIS concierge's own inject file (claudette -> telegram-claudette/inject),
+    matching the boot-rearm block's per-concierge isolation."""
+    msg = "Petite coupure technique, tout est ok — dis a Jade que tu es de retour."
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        recovery_ping_message=msg,
+    )
+    assert (
+        ">> /home/claude/.claude/channels/telegram-claudette/inject" in rendered
+    ), "recovery ping must append to claudette's OWN inject file."
+    assert msg in rendered
+
+
+def test_recovery_ping_debounce_checks_marker_age_and_consumes_it():
+    """The ExecStartPost must (a) reference the marker path, (b) gate on a
+    recency check against recovery_debounce_sec, and (c) consume (rm -f) the
+    marker so a restart never double-pings."""
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        recovery_ping_message="test message",
+        recovery_debounce_sec=90,
+        recovery_marker_path="/run/claude-agent-claudette/recovery-last-stop",
+    )
+    exec_post_lines = [
+        ln
+        for ln in rendered.splitlines()
+        if ln.strip().startswith("ExecStartPost=") and "recovery-last-stop" in ln
+    ]
+    assert exec_post_lines, "expected an ExecStartPost line referencing the debounce marker"
+    line = exec_post_lines[0]
+    assert "/run/claude-agent-claudette/recovery-last-stop" in line
+    assert "-lt 90" in line, "must gate on the configured recovery_debounce_sec (90)"
+    assert "rm -f" in line, "must consume the marker so a restart never double-pings"
+    assert "date +%%s" in line, "age computed from current time (doubled %%s — systemd specifier escaping)"
+    assert "stat -c %%Y" in line, "age computed from the marker's mtime (doubled %%s — systemd specifier escaping)"
+
+
+def test_recovery_ping_marker_touched_on_every_stop():
+    """ExecStopPost must touch the SAME marker path the ExecStartPost checks,
+    unconditionally (every stop — crash, restart, or deliberate), so the next
+    start can classify itself correctly."""
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        recovery_ping_message="test message",
+        recovery_marker_path="/run/claude-agent-claudette/recovery-last-stop",
+    )
+    exec_stop_lines = [
+        ln
+        for ln in rendered.splitlines()
+        if ln.strip().startswith("ExecStopPost=") and "recovery-last-stop" in ln
+    ]
+    assert exec_stop_lines, "expected an ExecStopPost line touching the debounce marker"
+    assert "touch /run/claude-agent-claudette/recovery-last-stop" in exec_stop_lines[0]
+
+
+def test_recovery_ping_delay_defaults_to_boot_inject_delay():
+    """When recovery_ping_delay_sec is unset (None), the template falls back
+    to boot_inject_delay_sec's own default (8s) rather than requiring both
+    fields to be set together."""
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        recovery_ping_message="test message",
+        recovery_ping_delay_sec=None,
+    )
+    exec_post_lines = [
+        ln
+        for ln in rendered.splitlines()
+        if ln.strip().startswith("ExecStartPost=") and "recovery-last-stop" in ln
+    ]
+    assert exec_post_lines
+    assert "sleep 8 &&" in exec_post_lines[0]
+
+
+def test_recovery_ping_delay_is_independently_configurable():
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        recovery_ping_message="test message",
+        recovery_ping_delay_sec=15,
+    )
+    exec_post_lines = [
+        ln
+        for ln in rendered.splitlines()
+        if ln.strip().startswith("ExecStartPost=") and "recovery-last-stop" in ln
+    ]
+    assert exec_post_lines
+    assert "sleep 15 &&" in exec_post_lines[0]
+
+
+def test_recovery_ping_message_rejects_embedded_single_quote():
+    """Same shell-quoting guard as boot_inject_message — the message is
+    rendered inside a single-quoted printf argv."""
+    with pytest.raises(TenantConfigError, match="single quote"):
+        _parse_systemd_for_test({"recovery_ping_message": "c'est bon"})
+
+
+def test_recovery_ping_message_rejects_empty_string():
+    with pytest.raises(TenantConfigError, match="non-empty"):
+        _parse_systemd_for_test({"recovery_ping_message": "   "})
+
+
+def test_recovery_ping_message_rejects_percent_sign():
+    """Same systemd specifier-escaping guard as boot_inject_message (Codex
+    P1, ops-loop-ben regression) — a message containing a bare % would sit
+    inside the same Exec*= line and get eaten by systemd's specifier
+    expansion before the shell ever runs."""
+    with pytest.raises(TenantConfigError, match="percent sign"):
+        _parse_systemd_for_test(
+            {"recovery_ping_message": "De retour (100% ok)"}
+        )
+
+
+def test_recovery_ping_message_parses_and_defaults():
+    cfg = _parse_systemd_for_test(
+        {"recovery_ping_message": "De retour en ligne, tout va bien."}
+    )
+    assert cfg.recovery_ping_message == "De retour en ligne, tout va bien."
+    assert cfg.recovery_ping_delay_sec is None
+    assert cfg.recovery_debounce_sec == 120
+
+
+def test_recovery_ping_message_defaults_to_none():
+    cfg = _parse_systemd_for_test({})
+    assert cfg.recovery_ping_message is None
+    assert cfg.recovery_debounce_sec == 120
+
+
+def test_recovery_ping_debounce_sec_is_configurable():
+    cfg = _parse_systemd_for_test(
+        {"recovery_ping_message": "De retour.", "recovery_debounce_sec": 90}
+    )
+    assert cfg.recovery_debounce_sec == 90
+
+
+def test_recovery_ping_and_boot_inject_coexist_independently():
+    """A concierge can opt into boot-rearm ONLY, recovery-ping ONLY, or BOTH
+    — the two ExecStartPost blocks must not interfere with each other."""
+    rendered = _render_systemd_with_recovery(
+        persona_name="claudette",
+        boot_inject_message="re-arm your crons via CronCreate",
+        recovery_ping_message="De retour en ligne.",
+    )
+    assert "re-arm your crons via CronCreate" in rendered
+    assert "De retour en ligne." in rendered
+    exec_post_lines = [
+        ln for ln in rendered.splitlines() if ln.strip().startswith("ExecStartPost=")
+    ]
+    assert len(exec_post_lines) == 2, "expected exactly two ExecStartPost lines (boot-rearm + recovery-ping)"
+
+
+def test_recovery_ping_marker_lives_under_runtime_env_dir_for_nonprimary():
+    """_systemd_unit.py wiring check: the marker path passed for a real
+    concierge render must live inside that concierge's OWN runtime_env_dir
+    (never another concierge's /run dir) — verified via the actual
+    _apply_one kwargs shape, not just the template in isolation.
+
+    Uses _render_lenient (see its docstring): this call path hits the SAME
+    pre-existing {{OPERATOR}} literal-placeholder line as every other render
+    of this template, unrelated to #691.
+    """
+    rendered = _render_lenient(
+        "claude-agent.service.j2",
+        persona_name="claudette",
+        tenant_name="bubble-internal",
+        age_key_path="/etc/age/key.txt",
+        encrypted_file_path="/etc/bubble/secrets.sops.env",
+        decrypted_runtime_path="/run/claude-agent-claudette/env",
+        runtime_env_dir="/run/claude-agent-claudette",
+        bot_token_secret_ref="CLAUDETTE_TELEGRAM_BOT_TOKEN",
+        telegram_state_dir="/home/claude/.claude/channels/telegram-claudette",
+        sops_bin="/usr/local/bin/sops",
+        claude_bin="/usr/bin/claude",
+        channels="plugin:telegram@claude-plugins-official",
+        restart="on-failure",
+        restart_sec=10,
+        nofile_limit=65536,
+    )
+    # No recovery kwargs passed at all (mirrors the OLDER _apply_one kwarg
+    # set, pre-#691) -> must render with nothing, proving the field is fully
+    # optional even from that older call shape.
+    assert "recovery-last-stop" not in rendered
+
+
 # ─── Per-concierge TELEGRAM_STATE_DIR export (SPEC-021 finding, multi-box) ─────
 #
 # The Telegram MCP plugin (server.ts) stores ALL of its per-agent runtime state

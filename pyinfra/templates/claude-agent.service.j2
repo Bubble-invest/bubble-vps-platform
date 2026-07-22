@@ -162,9 +162,57 @@ LimitNOFILE={{ nofile_limit }}
 # message can never reintroduce an unescaped specifier.
 ExecStartPost=/bin/sh -c "sleep {{ boot_inject_delay_sec | default(8) }} && printf '%%s\n' '{{ boot_inject_message }}' >> {{ telegram_state_dir }}/inject"
 {% endif %}
+{%- if recovery_ping_message | default(None) %}
+# Recovery self-announce (board card #691). Reuses the SAME delivery
+# primitive as the boot-rearm block above (ExecStartPost -> sleep -> append
+# to this concierge's own `inject` file, drained by the Telegram plugin as a
+# real session turn) but for a DIFFERENT problem: a restart ({{ restart }}
+# session exits, or an operator/watchdog restart) leaves a ~30-60s window
+# where the Telegram poller is reconnecting and the concierge can't answer.
+# It does not self-announce recovery, so an operator who messages it
+# mid-window gets silence and assumes it's down — when it's healthy seconds
+# later (Jade, 2026-07-16, board card #691).
+#
+# DEBOUNCE / restart-vs-first-boot detection: a marker file
+# ({{ recovery_marker_path }} — lives inside runtime_env_dir, the SAME
+# per-concierge /run tmpfs dir the secrets-decrypt ExecStartPre chain above
+# already creates + chowns, so it shares that dir's lifecycle for free), NOT
+# systemd's own Active/InactiveEnterTimestamp properties. Verified live
+# against claude-agent-claudette.service (2026-07-22): on a box that has only
+# ever been through Restart=on-failure auto-restarts, `systemctl show -p
+# InactiveEnterTimestamp` came back EMPTY — the unit never fully left the
+# activating/active state machine the way a clean stop/start does, so that
+# property is not a reliable restart signal here. A marker file sidesteps
+# this entirely:
+#   - ExecStopPost (below) touches the marker on EVERY stop (crash, restart,
+#     deliberate stop/deploy alike), with a defensive `mkdir -p` inline in
+#     case the very first stop ever races the ExecStartPre dir creation.
+#   - This ExecStartPost checks whether the marker exists AND is younger
+#     than {{ recovery_debounce_sec | default(120) }}s. /run is tmpfs, so a
+#     genuine host reboot clears it — a fresh first boot (or first boot after
+#     a VM reboot) always finds no marker and stays silent, same as a deploy
+#     that reprovisions /run. Only a same-boot service restart (crash or
+#     manual `systemctl restart`) leaves a fresh marker behind.
+#   - The marker is consumed (rm -f) as part of the same check so a restart
+#     never double-pings and a stale marker can't linger past its window.
+# One-line, French (Claudette speaks French to Jade) — kept SHORT since it is
+# itself an injected INSTRUCTION the concierge acts on (it composes and sends
+# the actual Telegram reply from its own session, same as the boot-rearm
+# turn above; this does not hardcode a bot token or call the Telegram API
+# directly).
+ExecStartPost=/bin/sh -c "sleep {{ recovery_ping_delay_sec | default(boot_inject_delay_sec | default(8, true), true) }} && m='{{ recovery_marker_path }}'; age=$(( $(date +%%s) - $(stat -c %%Y \"$m\" 2>/dev/null || echo 0) )); if [ -f \"$m\" ] && [ \"$age\" -lt {{ recovery_debounce_sec | default(120, true) }} ]; then rm -f \"$m\"; printf '%%s\n' '{{ recovery_ping_message }}' >> {{ telegram_state_dir }}/inject; fi"
+{% endif %}
 # Decrypted env file is removed when service stops — defense in depth even
 # though /run is tmpfs.
 ExecStopPost=+/bin/rm -f {{ decrypted_runtime_path }}
+{%- if recovery_ping_message | default(None) %}
+# Drops the recovery-debounce marker (board card #691) on EVERY stop —
+# restart-triggered or deliberate alike; the ExecStartPost above is what
+# tells the two cases apart (marker AGE on the NEXT start, not presence).
+# `mkdir -p` is defensive only — runtime_env_dir is already created by the
+# ExecStartPre chain above in the normal (non-racing) case.
+ExecStopPost=+/bin/sh -c 'mkdir -p {{ runtime_env_dir }} && touch {{ recovery_marker_path }}'
+{% endif %}
 
 [Install]
 WantedBy=multi-user.target
