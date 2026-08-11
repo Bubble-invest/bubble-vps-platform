@@ -4,4 +4,9 @@
 # Includes /usr/bin/install + /usr/bin/tee + /usr/bin/grep so the script can
 # create + append to /var/log/bubble-security/audit-<date>.log (root:adm 0640)
 # and run the no-plaintext-leak scan over /home /etc /root.
-claude ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status sshd, /usr/sbin/sshd -T, /usr/bin/last -F -50, /bin/cat /etc/sudoers.d/*, /bin/cat /etc/passwd, /usr/bin/journalctl, /usr/bin/install, /usr/bin/tee, /usr/bin/grep
+# /usr/bin/stat added 2026-08-11: Part 2's sops.env perms check needs to stat
+# a root:root 0440 file; without sudo the unprivileged `claude` user can't
+# even stat() it, so the check always fell through to "missing" (false
+# positive CRITICAL, board #871/#847/etc). Same pattern as the existing
+# sudo grep leak scan just below it.
+claude ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status sshd, /usr/sbin/sshd -T, /usr/bin/last -F -50, /bin/cat /etc/sudoers.d/*, /bin/cat /etc/passwd, /usr/bin/journalctl, /usr/bin/install, /usr/bin/tee, /usr/bin/grep, /usr/bin/stat
