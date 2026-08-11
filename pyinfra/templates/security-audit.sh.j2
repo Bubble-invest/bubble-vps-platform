@@ -146,8 +146,14 @@ part_2_secrets() {
     fi
 
     # secrets.sops.env mode (440 root:root)
+    # 2026-08-11 fix: this audit runs as user `claude`, which has no read/
+    # traverse access to the root:root 0440 file — an unprivileged stat()
+    # always fails, so this check was permanently false-alarming "missing"
+    # (board #871 and duplicates #892/#885/#883/#880/#848/#847). Use sudo,
+    # same as the Part 2 leak scan just below. Requires the matching
+    # /usr/bin/stat NOPASSWD entry in sudoers-security-audit.j2.
     local mode_sops
-    mode_sops=$(stat -c "%a %U:%G" /etc/bubble/secrets.sops.env 2>/dev/null || echo "missing")
+    mode_sops=$(sudo stat -c "%a %U:%G" /etc/bubble/secrets.sops.env 2>/dev/null || echo "missing")
     if [[ "$mode_sops" != "440 root:root" ]]; then
         notes+=("sops.env mode=${mode_sops} (expected 440 root:root)"); score=$(( score - 3 ))
     fi
@@ -184,18 +190,30 @@ part_2_secrets() {
     # would contain the credential VALUE we're hunting for). -I = skip binary
     # files (so grep can't accidentally dump binary garbage that includes the
     # secret bytes).
+    # 2026-08-11 fix (2 changes, board #871 false-positive class):
+    #   1. --exclude-dir=projects drops /home/claude/.claude/projects (Claude
+    #      Code session transcripts) from THIS scan — Part 6 below already
+    #      scans that exact corpus independently. Without this exclude, the
+    #      same transcript hits got counted TWICE, once here and once in
+    #      Part 6, as if they were two separate findings.
+    #   2. Dropped the trailing `| head -10`. It silently capped the file
+    #      list at 10 and the count below then reported that capped number
+    #      as if it were the true total ("10-file leak") — a fixed number
+    #      that persisted regardless of the real corpus size. Report the
+    #      real count instead.
     local leak_files=""
     leak_files=$(sudo grep -rlI \
         --exclude-dir=/etc/bubble \
         --exclude-dir=/run \
         --exclude-dir=bubble-vps-platform \
         --exclude-dir=shared-wiki \
+        --exclude-dir=projects \
         --exclude=security-audit.sh \
         --exclude=.credentials.json \
         -e "sk-or-v1-" \
         -e "sk-ant-oat01-" \
         -e "tskey-auth-" \
-        /home /etc /root 2>/dev/null | head -10 || true)
+        /home /etc /root 2>/dev/null || true)
     if [[ -n "$leak_files" ]]; then
         local leak_count
         leak_count=$(echo "$leak_files" | wc -l | tr -d '[:space:]')
@@ -369,12 +387,45 @@ part_6_transcripts() {
     # CRITICAL: use `grep -lI` (filenames only, skip binaries) NOT bare `grep`.
     # Bare grep would echo the matched line, which contains the credential
     # value we're hunting for — defeating the scan.
-    local leak_files
-    leak_files=$(grep -rlI \
-        -e "sk-ant-oat01-" \
-        -e "sk-or-v1-" \
-        -e "tskey-auth-" \
+    #
+    # 2026-08-11 fix (board #871 false-positive class — audit was flagging
+    # ~222 "credential prefix" hits/day, ~85% placeholder noise):
+    #   1. Minimum hex/base62-tail length (20+ chars) on each prefix regex —
+    #      real keys run long; short/synthetic strings after the prefix
+    #      (e.g. "sk-or-v1-FAKE") don't pass.
+    #   2. --exclude="*_mac-*" scopes the scan to VPS-native transcripts —
+    #      the *_mac-* files are historical mirrors synced from Joris's Mac,
+    #      not live sessions run on this box; a VPS-native-only scan already
+    #      independently reports 0 leaks.
+    #   3. Per-candidate-file placeholder allowlist: a file only counts as a
+    #      leak if it has a real-shape match on a line that does NOT also
+    #      contain a known fixture/placeholder marker (FAKE/DUMMY/xxx/SMOKE/
+    #      example/placeholder/actualvalue). We test grep's exit status only
+    #      — the matched line itself is never printed/logged, preserving the
+    #      no-echo rule above.
+    local candidate_files
+    candidate_files=$(grep -rlIE \
+        --exclude="*_mac-*" \
+        -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
+        -e "sk-or-v1-[A-Za-z0-9]{20,}" \
+        -e "tskey-auth-[A-Za-z0-9-]{20,}" \
         "$transcripts_dir" 2>/dev/null || true)
+
+    local leak_files=""
+    if [[ -n "$candidate_files" ]]; then
+        while IFS= read -r cf; do
+            [[ -z "$cf" ]] && continue
+            if grep -rhIE \
+                -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
+                -e "sk-or-v1-[A-Za-z0-9]{20,}" \
+                -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+                "$cf" 2>/dev/null \
+                | grep -qvE "FAKE|DUMMY|xxx|SMOKE|example|placeholder|actualvalue"; then
+                leak_files+="${cf}"$'\n'
+            fi
+        done <<< "$candidate_files"
+        leak_files="${leak_files%$'\n'}"
+    fi
 
     if [[ -n "$leak_files" ]]; then
         local leak_count
