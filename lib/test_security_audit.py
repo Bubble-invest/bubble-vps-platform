@@ -192,9 +192,12 @@ def test_audit_script_uses_grep_l_for_transcript_scan():
     transcript_grep_blocks = []
     fs_scan_grep_blocks = []
     for m in grep_call_matches:
-        # Take a window of up to 600 chars after the grep keyword (covers a
-        # ~10-line continued invocation comfortably).
-        block = rendered[m.start(): m.start() + 600]
+        # Take a window of up to 900 chars after the grep keyword (covers a
+        # ~15-line continued invocation comfortably — bumped from 600 in
+        # board #918, which added 3 more -e prefix lines to the Part 2/6
+        # grep calls (nfp_/ghp_/github_pat_), pushing the path argument
+        # past the old window).
+        block = rendered[m.start(): m.start() + 900]
         # Truncate at the first standalone closing structure (`)` followed
         # by newline, `;`, or end of pipeline).
         end = re.search(r"\)\s*\n", block)
@@ -688,6 +691,72 @@ def test_part2_shape_match_catches_genuine_planted_token():
     )
 
 
+def test_part2_shape_match_catches_planted_netlify_token():
+    """Board #918: #916's review found `nfp_` (Netlify — the exact prefix
+    of board #737's real live leak) was never in the scanner's prefix set,
+    so a live Netlify token still wouldn't have been caught. Plant an
+    obviously-fake but genuine-SHAPED `nfp_` token (NOT a real secret
+    value) and confirm Part 2's actual grep logic (extracted straight from
+    the rendered template) flags it — this is the direct coverage guard
+    for #918.
+    """
+    rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        scan_root = Path(td)
+        genuine = scan_root / "genuine"
+        genuine.mkdir()
+        # Obviously-fake planted token: sequential alphabet + digits, never
+        # a real secret value. Shape-matches nfp_ + 20+ chars.
+        (genuine / "leak.txt").write_text(
+            "NETLIFY_AUTH_TOKEN=nfp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n"
+        )
+
+        flagged = _run_leak_scan_fixture(rendered, scan_root)
+
+    assert any("genuine/leak.txt" in f for f in flagged), (
+        f"Part 2 still doesn't catch a genuine-shaped planted `nfp_` "
+        f"(Netlify) token — this is the exact live-leak class from board "
+        f"#737 that #918 was opened to close. Flagged files: {flagged}"
+    )
+
+
+def test_part2_shape_match_catches_planted_github_pat():
+    """Board #918: GitHub PATs (both `ghp_` classic and `github_pat_`
+    fine-grained) are a real credential class in this fleet — GITHUB_TOKEN
+    is consumed by git-credential-helper.sh.j2 for every git clone/push
+    this fleet does. Plant obviously-fake but genuine-SHAPED tokens of
+    both formats and confirm Part 2 flags both.
+    """
+    rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        scan_root = Path(td)
+        genuine = scan_root / "genuine"
+        genuine.mkdir()
+        (genuine / "classic.txt").write_text(
+            "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n"
+        )
+        (genuine / "fine_grained.txt").write_text(
+            "GITHUB_TOKEN=github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345_ABCDEF\n"
+        )
+
+        flagged = _run_leak_scan_fixture(rendered, scan_root)
+
+    assert any("genuine/classic.txt" in f for f in flagged), (
+        f"Part 2 doesn't catch a genuine-shaped planted `ghp_` (GitHub "
+        f"classic PAT) token. Flagged files: {flagged}"
+    )
+    assert any("genuine/fine_grained.txt" in f for f in flagged), (
+        f"Part 2 doesn't catch a genuine-shaped planted `github_pat_` "
+        f"(GitHub fine-grained PAT) token. Flagged files: {flagged}"
+    )
+
+
 def test_part2_shape_match_drops_artifact_classes():
     """Board #916: the tightening must drop the ~17/18 artifact classes
     identified in #905's triage while the genuine case above still fires.
@@ -746,6 +815,43 @@ def test_part2_shape_match_drops_artifact_classes():
         f"classes (bare prefix literal, own .bak-* backup, FAKE placeholder, "
         f"hooks/ hook script, .credentials.json.disabled) — these should all "
         f"be dropped per board #916. Flagged files: {flagged}"
+    )
+
+
+def test_part2_new_918_prefixes_drop_same_artifact_classes():
+    """Board #918: adding `nfp_`/`ghp_`/`github_pat_` must NOT reintroduce
+    the #916 artifact false-positive classes for the new prefixes. Same
+    artifact shapes as test_part2_shape_match_drops_artifact_classes above
+    (bare prefix literal, FAKE-marked placeholder), replayed against the
+    three prefixes added by #918.
+    """
+    rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        scan_root = Path(td)
+
+        bare = scan_root / "bare_prefix"
+        bare.mkdir()
+        (bare / "reference.txt").write_text(
+            "# credential prefix reference: nfp_ / ghp_ / github_pat_\n"
+        )
+
+        placeholder = scan_root / "placeholder"
+        placeholder.mkdir()
+        (placeholder / "fixture_doc.md").write_text(
+            "example: nfp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE (placeholder, not real)\n"
+            "example: ghp_DUMMYDUMMYDUMMYDUMMYDUMMYDUMMY (placeholder, not real)\n"
+        )
+
+        flagged = _run_leak_scan_fixture(rendered, scan_root)
+
+    assert flagged == [], (
+        f"Newly-added #918 prefixes (nfp_/ghp_/github_pat_) flagged known "
+        f"artifact classes (bare prefix literal, FAKE/DUMMY placeholder) — "
+        f"this would reintroduce the #916 false-positive problem for the "
+        f"new prefixes. Flagged files: {flagged}"
     )
 
 
