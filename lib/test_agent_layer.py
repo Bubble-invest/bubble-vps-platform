@@ -1204,6 +1204,72 @@ def test_recovery_ping_marker_lives_under_runtime_env_dir_for_nonprimary():
     assert "recovery-last-stop" not in rendered
 
 
+# ─── Redeploy must not fire a spurious recovery ping (#743) ───────────────────
+#
+# #691's ExecStopPost touches the recovery-debounce marker on EVERY stop —
+# crash, watchdog recovery, or an ordinary code-only redeploy alike. A bare
+# `systemctl restart` on the deploy path left that marker fresh across the
+# stop->start boundary, so ExecStartPost's <120s age-check fired a spurious
+# "de retour" ping even though the concierge was never actually down. The
+# fix scopes the deploy-triggered restart (only fires when the unit content
+# changed) to explicitly clear the marker between stop and start — see
+# _systemd_unit.py's `_apply_one`, step 4.
+
+
+def test_systemd_unit_redeploy_clears_recovery_marker_before_restart():
+    """Static source check (mirrors this file's other _systemd_unit.py wiring
+    checks): a concierge with the #691 recovery ping opted in must have its
+    redeploy restart split into stop -> rm -f <marker> -> start, NOT a bare
+    `systemctl restart` — otherwise ExecStartPost finds the marker
+    ExecStopPost just touched and fires a spurious ping on every code-only
+    redeploy."""
+    source = (AGENT_TASKS_DIR / "_systemd_unit.py").read_text(encoding="utf-8")
+    assert "systemctl stop {service_name}" in source, (
+        "_systemd_unit.py: redeploy restart must explicitly stop the unit "
+        "(not a bare `systemctl restart`) so the recovery marker can be "
+        "cleared before the unit starts back up."
+    )
+    assert "rm -f {recovery_marker_path}" in source, (
+        "_systemd_unit.py: redeploy restart must rm -f the recovery-ping "
+        "debounce marker between stop and start (#743) — otherwise "
+        "ExecStartPost finds a fresh marker and fires a spurious ping."
+    )
+    assert "systemctl start {service_name}" in source, (
+        "_systemd_unit.py: redeploy restart must explicitly start the unit "
+        "after clearing the marker."
+    )
+    assert 'f"systemctl restart {service_name}"' in source, (
+        "_systemd_unit.py: a concierge WITHOUT recovery_ping_message set "
+        "must keep the historical bare `systemctl restart` (no marker "
+        "rendered into its unit, no reason to add stop/start churn)."
+    )
+    assert "if sysd.recovery_ping_message" in source, (
+        "_systemd_unit.py: the stop->rm->start split must be gated on "
+        "sysd.recovery_ping_message — only concierges with the #691 marker "
+        "rendered into their unit need it cleared on redeploy."
+    )
+
+
+def test_systemd_unit_redeploy_marker_matches_template_marker():
+    """The recovery_marker_path used to clear the marker on redeploy (#743)
+    must be the SAME variable passed as recovery_marker_path= into the
+    template render (#691) — computed once from rt_dir and reused, not
+    re-derived at each call site, so the two can never drift apart and end
+    up clearing a different file than the one the unit actually touches."""
+    source = (AGENT_TASKS_DIR / "_systemd_unit.py").read_text(encoding="utf-8")
+    assert 'recovery_marker_path = f"{rt_dir}/recovery-last-stop"' in source, (
+        "_systemd_unit.py: recovery_marker_path must be computed ONCE from "
+        "rt_dir and reused for both the template render and the redeploy "
+        "marker-clear (#743) — do not re-derive it at each call site."
+    )
+    assert "recovery_marker_path=recovery_marker_path" in source, (
+        "_systemd_unit.py: the template render must use the shared "
+        "recovery_marker_path variable, not a freshly-computed literal — "
+        "otherwise it could silently diverge from the path #743's redeploy "
+        "restart clears."
+    )
+
+
 # ─── Per-concierge TELEGRAM_STATE_DIR export (SPEC-021 finding, multi-box) ─────
 #
 # The Telegram MCP plugin (server.ts) stores ALL of its per-agent runtime state

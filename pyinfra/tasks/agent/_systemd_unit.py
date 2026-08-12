@@ -16,6 +16,20 @@ Restart-on-config-change:
     pattern (used in hardening for sshd reload) fires a `systemctl restart`.
     We do the same here: rendering a new unit + daemon-reload + restart all
     follow the template change.
+
+    Board card #743 refinement: for a concierge that has the #691 recovery
+    ping opted in (systemd.recovery_ping_message set), a bare `systemctl
+    restart` here would fire ExecStopPost (touches a fresh debounce marker)
+    then ExecStartPost (sees the fresh marker, <120s old) => a SPURIOUS
+    "de retour" ping on an ordinary code-only redeploy, even though the
+    concierge was never actually down. Fix: the deploy path splits the
+    restart into stop -> rm -f the marker -> start, so ExecStartPost finds
+    NO marker on the deploy-triggered start (same code path as a genuine
+    reboot => stays silent). This does NOT touch the crash-restart case
+    (systemd's own Restart=on-failure loop stays entirely inside the unit's
+    lifecycle, no deploy-path intervention) or the telegram-watchdog's
+    stop->settle->start recovery (it never clears the marker), so both of
+    those keep pinging as designed.
 """
 
 from __future__ import annotations
@@ -114,6 +128,12 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
     # morty → bare telegram/ (live state must not move); others → telegram-<name>/.
     telegram_state_dir = telegram_channel_dir(persona_name)
 
+    # Recovery-ping debounce marker path (#691). Computed once here so it can
+    # be reused both by the template render (below) AND by the deploy-path
+    # restart step's marker-clear (#743, see step 4) — single source, can
+    # never drift between the two call sites.
+    recovery_marker_path = f"{rt_dir}/recovery-last-stop"
+
     # 1) Render the unit file. The template embeds per-concierge paths
     #    (workdir, decrypt target dir + file) so multiple concierges on one box
     #    have their own units without path collisions.
@@ -165,7 +185,7 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
         recovery_ping_message=sysd.recovery_ping_message,
         recovery_ping_delay_sec=sysd.recovery_ping_delay_sec,
         recovery_debounce_sec=sysd.recovery_debounce_sec,
-        recovery_marker_path=f"{rt_dir}/recovery-last-stop",
+        recovery_marker_path=recovery_marker_path,
         # The deploy connects AS the claude user (tenant ssh_user: claude).
         # /etc/systemd/system/ is root-owned (user="root" target above), so we
         # MUST escalate to root to write it — `_sudo=True` with NO `_sudo_user`
@@ -202,10 +222,43 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
         _sudo=True,
     )
 
-    # systemctl restart on a system unit is root-only → `_sudo=True`.
+    # 4) Restart on unit-content change. systemctl restart/stop/start on a
+    #    system unit is root-only -> `_sudo=True`.
+    #
+    #    Board card #743: for a concierge with the #691 recovery ping opted
+    #    in, a bare `systemctl restart` here fires ExecStopPost (touches a
+    #    fresh /run debounce marker) then, moments later, ExecStartPost
+    #    (finds that SAME fresh marker, <120s old) -> a spurious "de retour"
+    #    ping on an ordinary code-only redeploy, even though the concierge
+    #    was never actually down. `systemctl restart` is a single job that
+    #    transitions stop->start with no hook point in between for us to
+    #    intervene, so the fix splits it into three explicit commands:
+    #    stop (blocks until ExecStopPost has run and the unit is inactive,
+    #    same as `systemctl restart` already blocked on) -> rm -f the
+    #    marker -> start. ExecStartPost then finds NO marker file, the exact
+    #    same "nothing to see here" state a genuine reboot leaves behind
+    #    (/run is tmpfs) -> stays silent. This ONLY changes the deploy path:
+    #    a genuine crash-restart (systemd's own Restart=on-failure loop) and
+    #    the telegram-watchdog's stop->settle->start recovery (which never
+    #    touches this marker) are untouched and keep pinging as designed.
+    #
+    #    Scoped to concierges that actually opted into the recovery ping —
+    #    for morty (recovery_ping_message unset) the marker is never created
+    #    by the unit in the first place, so this keeps the historical bare
+    #    `systemctl restart` verbatim (no churn), matching the "byte-identical
+    #    when unset" ethos the rest of this module follows.
+    if sysd.recovery_ping_message:
+        restart_commands = [
+            f"systemctl stop {service_name}",
+            f"rm -f {recovery_marker_path}",
+            f"systemctl start {service_name}",
+        ]
+    else:
+        restart_commands = [f"systemctl restart {service_name}"]
+
     server.shell(
         name=f"agent/systemd: restart {service_name} (only if unit changed)",
-        commands=[f"systemctl restart {service_name}"],
+        commands=restart_commands,
         _if=unit_op.did_change,
         _sudo=True,
     )
