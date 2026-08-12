@@ -813,6 +813,24 @@ def test_boot_inject_message_rejects_embedded_carriage_return():
         _parse_systemd_for_test({"boot_inject_message": "re-arm mail_brief_0832\rmore"})
 
 
+def test_boot_inject_message_rejects_trailing_backslash():
+    """systemd's unit-file line reader treats a trailing backslash (\\) at
+    end-of-line as a line-continuation marker, even inside quoted content
+    (systemd/systemd#10598) — a message ending in `\\` would merge the next
+    physical line of the rendered .service unit into this Exec*= directive
+    (board card #745)."""
+    with pytest.raises(TenantConfigError, match="backslash"):
+        _parse_systemd_for_test({"boot_inject_message": "re-arm mail_brief_0832\\"})
+
+
+def test_boot_inject_message_rejects_embedded_backslash():
+    """The guard rejects a backslash anywhere in the message, not just a
+    trailing one — matches the same reject-the-whole-character conservatism
+    as the other guards (board card #745)."""
+    with pytest.raises(TenantConfigError, match="backslash"):
+        _parse_systemd_for_test({"boot_inject_message": "re-arm \\ mail_brief_0832"})
+
+
 def test_boot_inject_message_still_accepts_normal_single_line_value():
     """A normal single-line message must still pass — the newline/CR guard
     (#744) must not reject ordinary text."""
@@ -1097,6 +1115,13 @@ def test_recovery_ping_message_rejects_embedded_carriage_return():
     through the same shared _validate_inject_message guard."""
     with pytest.raises(TenantConfigError, match="carriage return"):
         _parse_systemd_for_test({"recovery_ping_message": "De retour\rplus"})
+
+
+def test_recovery_ping_message_rejects_trailing_backslash():
+    """Same line-continuation merge risk as boot_inject_message (#745) —
+    both fields go through the same shared _validate_inject_message guard."""
+    with pytest.raises(TenantConfigError, match="backslash"):
+        _parse_systemd_for_test({"recovery_ping_message": "De retour\\"})
 
 
 def test_recovery_ping_message_still_accepts_normal_single_line_value():
