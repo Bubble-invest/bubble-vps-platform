@@ -154,6 +154,18 @@ def _apply_one(cfg, concierge, s, *, is_primary: bool) -> None:
         # churn on morty's golden unit).
         boot_inject_message=sysd.boot_inject_message,
         boot_inject_delay_sec=sysd.boot_inject_delay_sec,
+        # Recovery self-announce (#691). Same opt-in-per-concierge shape as
+        # boot_inject_message: None (default) → the template's {% if %}
+        # block renders nothing, byte-identical to today for any concierge
+        # that doesn't set systemd.recovery_ping_message. The debounce
+        # marker lives inside THIS concierge's own runtime_env_dir (rt_dir,
+        # the same per-concierge /run tmpfs dir the secrets-decrypt
+        # ExecStartPre chain already creates + chowns) so it can never
+        # collide with another concierge's marker on a multi-concierge box.
+        recovery_ping_message=sysd.recovery_ping_message,
+        recovery_ping_delay_sec=sysd.recovery_ping_delay_sec,
+        recovery_debounce_sec=sysd.recovery_debounce_sec,
+        recovery_marker_path=f"{rt_dir}/recovery-last-stop",
         # The deploy connects AS the claude user (tenant ssh_user: claude).
         # /etc/systemd/system/ is root-owned (user="root" target above), so we
         # MUST escalate to root to write it — `_sudo=True` with NO `_sudo_user`

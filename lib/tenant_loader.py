@@ -180,6 +180,29 @@ class AgentSystemdConfig:
     # for why 8s was chosen there). Only meaningful when boot_inject_message
     # is set.
     boot_inject_delay_sec: int = 8
+    # Recovery self-announce (board card #691). None (default) → no extra
+    # ExecStartPost/ExecStopPost pair is rendered, so an un-opted-in concierge
+    # (including morty) stays byte-identical to today. When set, on a RESTART
+    # (not a fresh first boot — debounced via a /run marker file, see the
+    # template's comment block) the concierge's `inject` file watcher receives
+    # this exact text as a session turn, instructing it to tell its operator
+    # it's back ("de retour ✅"). Opt-in PER CONCIERGE — a dept whose operator
+    # doesn't want a recovery ping simply never sets this field.
+    recovery_ping_message: Optional[str] = None
+    # Seconds to sleep before the debounce check + inject write (mirrors
+    # boot_inject_delay_sec — same file-watcher settle-time reasoning).
+    # Defaults to boot_inject_delay_sec's own default at render time when
+    # unset (see the template), so a concierge that sets ONLY
+    # recovery_ping_message still gets a sane 8s delay without also having to
+    # set boot_inject_delay_sec.
+    recovery_ping_delay_sec: Optional[int] = None
+    # How recent the /run debounce marker must be (seconds since last stop)
+    # for a start to be classified as a RESTART (→ ping) rather than a fresh
+    # first boot / long-stopped deploy (→ silent). 120s comfortably covers the
+    # observed ~30-60s Telegram-poller reconnect window (#691) with margin,
+    # while staying well short of anything that could look like "still the
+    # same maintenance window" hours later.
+    recovery_debounce_sec: int = 120
 
 
 @dataclass
@@ -642,46 +665,76 @@ def _parse_llm(llm_d: Optional[Any], where: str) -> AgentLLMConfig:
     )
 
 
+def _validate_inject_message(message: str, field_name: str, where: str) -> None:
+    """Shared guard for any message rendered into an Exec*= inject line
+    (`printf '%%s\n' '<message>' >> .../inject`) — boot_inject_message (#590)
+    and recovery_ping_message (#691) both go through this same delivery
+    primitive, so both need the same two protections.
+    """
+    if not isinstance(message, str) or message.strip() == "":
+        raise TenantConfigError(
+            f"{where}.{field_name} must be a non-empty string, got {message!r}"
+        )
+    # Rendered into a single-quoted printf argv. A literal single quote
+    # would break out of that quoting, so we reject it at parse time rather
+    # than trying to escape it silently.
+    if "'" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a single quote (') — "
+            f"it is rendered inside a single-quoted shell argument; "
+            f"got {message!r}"
+        )
+    # systemd specifier escaping (Codex P1, discovered via ops-loop-ben's
+    # boot-inject.conf being broken since 2026-06-27 — board card filed):
+    # systemd expands `%` specifiers (e.g. %h, %n, %s) in ANY Exec*= line
+    # BEFORE the shell runs. The template already double-escapes its OWN
+    # literal `%%s` printf format so systemd's pass collapses it back to
+    # a literal `%s` for sh/printf — but that only protects the format
+    # string the template writes, not arbitrary text a caller supplies.
+    # A `%` anywhere inside the message would sit inside the same Exec*=
+    # line and get run through systemd's specifier expansion too, so we
+    # reject it outright rather than trying to double-escape caller-
+    # controlled text.
+    if "%" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a percent sign (%) — "
+            f"the message is rendered inside a systemd Exec*= line, and "
+            f"systemd expands % specifiers there BEFORE the shell runs "
+            f"(proven live on ops-loop-ben's boot-inject.conf: an unescaped "
+            f"%s was expanded to '/usr/bin/bash', silently dropping the "
+            f"injected message); got {message!r}"
+        )
+    # The message is rendered as a single Exec*= line in the systemd unit
+    # (board card #744). An embedded newline or carriage return would inject
+    # a literal extra line into the rendered .service file, corrupting the
+    # unit — reject it at parse time rather than letting it reach the render.
+    if "\n" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a newline (\\n) — "
+            f"the message is rendered as a single Exec*= line in the "
+            f"systemd unit, and an embedded newline would inject a literal "
+            f"extra line, corrupting the unit; got {message!r}"
+        )
+    if "\r" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a carriage return (\\r) — "
+            f"the message is rendered as a single Exec*= line in the "
+            f"systemd unit, and an embedded carriage return would corrupt "
+            f"the rendered unit; got {message!r}"
+        )
+
+
 def _parse_systemd(systemd_d: Optional[Any], where: str) -> AgentSystemdConfig:
     """Parse a `systemd:` mapping (all fields optional with defaults)."""
     systemd_d = systemd_d or {}
     systemd_d = _ensure_dict(systemd_d, where)
     boot_inject_message = systemd_d.get("boot_inject_message")
     if boot_inject_message is not None:
-        if not isinstance(boot_inject_message, str) or boot_inject_message.strip() == "":
-            raise TenantConfigError(
-                f"{where}.boot_inject_message must be a non-empty string, "
-                f"got {boot_inject_message!r}"
-            )
-        # Rendered into a single-quoted printf argv (see boot-inject.sh.j2).
-        # A literal single quote would break out of that quoting, so we
-        # reject it at parse time rather than trying to escape it silently.
-        if "'" in boot_inject_message:
-            raise TenantConfigError(
-                f"{where}.boot_inject_message must not contain a single "
-                f"quote (') — it is rendered inside a single-quoted shell "
-                f"argument; got {boot_inject_message!r}"
-            )
-        # systemd specifier escaping (Codex P1, discovered via ops-loop-ben's
-        # boot-inject.conf being broken since 2026-06-27 — board card filed):
-        # systemd expands `%` specifiers (e.g. %h, %n, %s) in ANY Exec*= line
-        # BEFORE the shell runs. The template already double-escapes its OWN
-        # literal `%%s` printf format so systemd's pass collapses it back to
-        # a literal `%s` for sh/printf — but that only protects the format
-        # string the template writes, not arbitrary text a caller supplies.
-        # A `%` anywhere inside boot_inject_message would sit inside the same
-        # Exec*= line and get run through systemd's specifier expansion too,
-        # so we reject it outright rather than trying to double-escape
-        # caller-controlled text.
-        if "%" in boot_inject_message:
-            raise TenantConfigError(
-                f"{where}.boot_inject_message must not contain a percent "
-                f"sign (%) — the message is rendered inside a systemd Exec*= "
-                f"line, and systemd expands % specifiers there BEFORE the "
-                f"shell runs (proven live on ops-loop-ben's boot-inject.conf: "
-                f"an unescaped %s was expanded to '/usr/bin/bash', silently "
-                f"dropping the injected message); got {boot_inject_message!r}"
-            )
+        _validate_inject_message(boot_inject_message, "boot_inject_message", where)
+    recovery_ping_message = systemd_d.get("recovery_ping_message")
+    if recovery_ping_message is not None:
+        _validate_inject_message(recovery_ping_message, "recovery_ping_message", where)
+    recovery_ping_delay_sec = systemd_d.get("recovery_ping_delay_sec")
     return AgentSystemdConfig(
         restart=str(systemd_d.get("restart", "on-failure")),
         restart_sec=int(systemd_d.get("restart_sec", 10)),
@@ -690,6 +743,13 @@ def _parse_systemd(systemd_d: Optional[Any], where: str) -> AgentSystemdConfig:
             None if boot_inject_message is None else str(boot_inject_message)
         ),
         boot_inject_delay_sec=int(systemd_d.get("boot_inject_delay_sec", 8)),
+        recovery_ping_message=(
+            None if recovery_ping_message is None else str(recovery_ping_message)
+        ),
+        recovery_ping_delay_sec=(
+            None if recovery_ping_delay_sec is None else int(recovery_ping_delay_sec)
+        ),
+        recovery_debounce_sec=int(systemd_d.get("recovery_debounce_sec", 120)),
     )
 
 
