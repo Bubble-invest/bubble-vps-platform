@@ -235,6 +235,25 @@ part_2_secrets() {
     #      timestamped backups (*.bak-*, e.g. security-audit.sh.bak-1755000),
     #      rotated/disabled copies of .credentials.json (glob instead of
     #      exact match), and bubble-ops-loop's deploy/ + hooks/ dirs.
+    # 2026-08-12 fix (board #918 — #916 review found `nfp_` (Netlify, the
+    # live-leak class in board #737) was never in this list, so a real
+    # Netlify token wouldn't be caught): added `nfp_` plus two more prefix
+    # classes this fleet genuinely uses credentials for (GitHub PAT, both
+    # formats — GITHUB_TOKEN is consumed by git-credential-helper.sh.j2 for
+    # every git clone/push this fleet does). Considered-but-NOT-added:
+    # AWS AKIA (SPEC-001/ARCHITECTURE.md: `aws` is only a future-provider
+    # enum value, no live AWS credential exists yet — speculative), Slack
+    # xoxb-/xoxp- (NORTH-STAR-BUBBLE-CABINET.md explicitly rejects Slack as
+    # a dependency), Hetzner HCLOUD_TOKEN (real credential, but it's a bare
+    # 64-char hex string with NO distinctive literal prefix — this
+    # prefix+shape technique can't target it without flagging every git SHA
+    # / checksum; needs a different, context-based detection), and SOPS age
+    # private keys / AGE-SECRET-KEY-1 (real and highest-value in the fleet,
+    # but every tenant box legitimately stores its OWN key at a
+    # per-tenant-configurable path, default /etc/age/key.txt — shape-
+    # matching it here without a config-aware exclude would create a
+    # guaranteed CRITICAL false positive on every box, every day; needs its
+    # own follow-up card, not a blind mirror of this pattern).
     # BEGIN-LEAK-SCAN (lib/test_security_audit.py extracts between these
     # sentinels for a behavioral fixture test — keep this block self-
     # contained: only reads leak_candidates/leak_files/cf, never notes/score
@@ -254,6 +273,9 @@ part_2_secrets() {
         -e "sk-or-v1-[A-Za-z0-9]{20,}" \
         -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
         -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+        -e "nfp_[A-Za-z0-9]{20,}" \
+        -e "ghp_[A-Za-z0-9]{20,}" \
+        -e "github_pat_[A-Za-z0-9_]{20,}" \
         /home /etc /root 2>/dev/null || true)
 
     local leak_files=""
@@ -264,6 +286,9 @@ part_2_secrets() {
                 -e "sk-or-v1-[A-Za-z0-9]{20,}" \
                 -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
                 -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+                -e "nfp_[A-Za-z0-9]{20,}" \
+                -e "ghp_[A-Za-z0-9]{20,}" \
+                -e "github_pat_[A-Za-z0-9_]{20,}" \
                 "$cf" 2>/dev/null \
                 | grep -qvE "FAKE|DUMMY|xxx|SMOKE|example|placeholder|actualvalue"; then
                 leak_files+="${cf}"$'\n'
@@ -461,12 +486,20 @@ part_6_transcripts() {
     #      example/placeholder/actualvalue). We test grep's exit status only
     #      — the matched line itself is never printed/logged, preserving the
     #      no-echo rule above.
+    # 2026-08-12 fix (board #918): added the same `nfp_`/`ghp_`/
+    # `github_pat_` prefixes as Part 2 above, for consistency — see the
+    # comment on Part 2's BEGIN-LEAK-SCAN block for the full added/
+    # considered-but-not-added rationale (Netlify #737 live-leak class,
+    # GitHub PAT real usage, AWS/Slack/Hetzner/age-key deferred).
     local candidate_files
     candidate_files=$(grep -rlIE \
         --exclude="*_mac-*" \
         -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
         -e "sk-or-v1-[A-Za-z0-9]{20,}" \
         -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+        -e "nfp_[A-Za-z0-9]{20,}" \
+        -e "ghp_[A-Za-z0-9]{20,}" \
+        -e "github_pat_[A-Za-z0-9_]{20,}" \
         "$transcripts_dir" 2>/dev/null || true)
 
     local leak_files=""
@@ -477,6 +510,9 @@ part_6_transcripts() {
                 -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
                 -e "sk-or-v1-[A-Za-z0-9]{20,}" \
                 -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+                -e "nfp_[A-Za-z0-9]{20,}" \
+                -e "ghp_[A-Za-z0-9]{20,}" \
+                -e "github_pat_[A-Za-z0-9_]{20,}" \
                 "$cf" 2>/dev/null \
                 | grep -qvE "FAKE|DUMMY|xxx|SMOKE|example|placeholder|actualvalue"; then
                 leak_files+="${cf}"$'\n'
