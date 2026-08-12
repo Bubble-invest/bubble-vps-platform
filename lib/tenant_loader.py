@@ -669,7 +669,7 @@ def _validate_inject_message(message: str, field_name: str, where: str) -> None:
     """Shared guard for any message rendered into an Exec*= inject line
     (`printf '%%s\n' '<message>' >> .../inject`) — boot_inject_message (#590)
     and recovery_ping_message (#691) both go through this same delivery
-    primitive, so both need the same two protections.
+    primitive, so both need the same protections.
     """
     if not isinstance(message, str) or message.strip() == "":
         raise TenantConfigError(
@@ -721,6 +721,22 @@ def _validate_inject_message(message: str, field_name: str, where: str) -> None:
             f"the message is rendered as a single Exec*= line in the "
             f"systemd unit, and an embedded carriage return would corrupt "
             f"the rendered unit; got {message!r}"
+        )
+    # Board card #745: systemd's unit-file line reader treats a trailing
+    # backslash (\) at end-of-line as a line-continuation marker, even
+    # inside quoted content (systemd/systemd#10598) — a message ending in
+    # `\` would merge the *next physical line* of the rendered .service
+    # unit into this Exec*= directive. We reject any backslash anywhere in
+    # the message (not just a trailing one), matching the same
+    # reject-the-whole-character conservatism as the other guards above
+    # rather than special-casing only the end-of-string position.
+    if "\\" in message:
+        raise TenantConfigError(
+            f"{where}.{field_name} must not contain a backslash (\\) — "
+            f"the message is rendered as a single Exec*= line in the "
+            f"systemd unit, and a trailing backslash is treated by systemd "
+            f"as a line-continuation marker, which would merge the next "
+            f"physical unit line into this directive; got {message!r}"
         )
 
 
