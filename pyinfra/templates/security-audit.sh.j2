@@ -176,7 +176,8 @@ part_2_secrets() {
     #   - /etc/bubble/   (where the encrypted blob legitimately lives)
     #   - /run/          (tmpfs runtime decrypted env)
     #   - this audit script itself (it contains the prefixes as grep needles)
-    #   - .credentials.json (Claude Code's own login store, mode 0600)
+    #   - .credentials.json* (Claude Code's own login store, mode 0600, incl.
+    #     rotated/disabled copies like .credentials.json.disabled)
     #   - bubble-vps-platform/ (specs/STATUS reference the prefixes in docs)
     #   - shared-wiki/   (cross-agent wiki — by design contains prefix names
     #     in docs/post-mortems/concept pages; multiple false positives
@@ -186,6 +187,12 @@ part_2_secrets() {
     #     prefix + 20-char suffix at lockdown time. Same intent as
     #     bubble-vps-platform exclude: "documentation about creds is not
     #     a cred leak".
+    #   - deploy/ + hooks/ (bubble-ops-loop/deploy + bubble-ops-loop/hooks —
+    #     the output-guard.py / test_output_guard.py hook scripts legitimately
+    #     define these SAME prefixes as their own detection regex; same FP
+    #     class as the bubble-vps-platform/shared-wiki excludes above. grep's
+    #     --exclude-dir matches directory BASENAME only, same limitation the
+    #     existing --exclude-dir=projects entry already accepts)
     # Use grep -lI: -l = list filenames only (NEVER echo matched lines, which
     # would contain the credential VALUE we're hunting for). -I = skip binary
     # files (so grep can't accidentally dump binary garbage that includes the
@@ -201,19 +208,70 @@ part_2_secrets() {
     #      as if it were the true total ("10-file leak") — a fixed number
     #      that persisted regardless of the real corpus size. Report the
     #      real count instead.
-    local leak_files=""
-    leak_files=$(sudo grep -rlI \
+    # 2026-08-12 fix (board #916/#905 — 10->18 false-positive flood, 17/18
+    # hits were artifacts): same "shape match + placeholder allowlist"
+    # technique Part 6 already uses for the transcript scan below, applied
+    # here too.
+    #   1. Prefix+SHAPE match instead of bare prefix-SUBSTRING match: a
+    #      genuine token is a known prefix followed by >=20 high-entropy
+    #      chars (same regex classes as Part 6). A bare grep-needle literal
+    #      sitting in this script's own timestamped backups, a sibling
+    #      transcript-leak-scan.sh copy, or an output-guard.py hook that
+    #      defines the SAME prefix as its own detection regex has nothing
+    #      after the prefix and no longer matches. A real leaked token (20+
+    #      random chars after the prefix — same shape as the live nfp_ leak
+    #      in board #737) still matches every time.
+    #   2. Placeholder allowlist: a shape-match alone would still flag a doc
+    #      fixture that pairs a known prefix with a same-length/charset FAKE
+    #      value (see lib/test_security_audit.py for a concrete example).
+    #      Per-candidate-file recheck: a file only
+    #      counts as a leak if it has a real-shape match on a line that does
+    #      NOT also contain a known fixture/placeholder marker (FAKE/DUMMY/
+    #      xxx/SMOKE/example/placeholder/actualvalue) — mirrors Part 6. We
+    #      test grep's exit status only — the matched line itself is never
+    #      printed/logged, preserving the no-echo rule above.
+    #   3. Extended --exclude for the remaining self-referential artifact
+    #      classes identified in #905's triage: this scanner's own
+    #      timestamped backups (*.bak-*, e.g. security-audit.sh.bak-1755000),
+    #      rotated/disabled copies of .credentials.json (glob instead of
+    #      exact match), and bubble-ops-loop's deploy/ + hooks/ dirs.
+    # BEGIN-LEAK-SCAN (lib/test_security_audit.py extracts between these
+    # sentinels for a behavioral fixture test — keep this block self-
+    # contained: only reads leak_candidates/leak_files/cf, never notes/score
+    # directly inside the loop body).
+    local leak_candidates=""
+    leak_candidates=$(sudo grep -rlIE \
         --exclude-dir=/etc/bubble \
         --exclude-dir=/run \
         --exclude-dir=bubble-vps-platform \
         --exclude-dir=shared-wiki \
         --exclude-dir=projects \
+        --exclude-dir=deploy \
+        --exclude-dir=hooks \
         --exclude=security-audit.sh \
-        --exclude=.credentials.json \
-        -e "sk-or-v1-" \
-        -e "sk-ant-oat01-" \
-        -e "tskey-auth-" \
+        --exclude="*.bak-*" \
+        --exclude=".credentials.json*" \
+        -e "sk-or-v1-[A-Za-z0-9]{20,}" \
+        -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
+        -e "tskey-auth-[A-Za-z0-9-]{20,}" \
         /home /etc /root 2>/dev/null || true)
+
+    local leak_files=""
+    if [[ -n "$leak_candidates" ]]; then
+        while IFS= read -r cf; do
+            [[ -z "$cf" ]] && continue
+            if sudo grep -rhIE \
+                -e "sk-or-v1-[A-Za-z0-9]{20,}" \
+                -e "sk-ant-oat01-[A-Za-z0-9_-]{20,}" \
+                -e "tskey-auth-[A-Za-z0-9-]{20,}" \
+                "$cf" 2>/dev/null \
+                | grep -qvE "FAKE|DUMMY|xxx|SMOKE|example|placeholder|actualvalue"; then
+                leak_files+="${cf}"$'\n'
+            fi
+        done <<< "$leak_candidates"
+        leak_files="${leak_files%$'\n'}"
+    fi
+    # END-LEAK-SCAN
     if [[ -n "$leak_files" ]]; then
         local leak_count
         leak_count=$(echo "$leak_files" | wc -l | tr -d '[:space:]')
@@ -391,8 +449,8 @@ part_6_transcripts() {
     # 2026-08-11 fix (board #871 false-positive class — audit was flagging
     # ~222 "credential prefix" hits/day, ~85% placeholder noise):
     #   1. Minimum hex/base62-tail length (20+ chars) on each prefix regex —
-    #      real keys run long; short/synthetic strings after the prefix
-    #      (e.g. "sk-or-v1-FAKE") don't pass.
+    #      real keys run long; a short/synthetic tail glued onto a known
+    #      prefix (e.g. a 4-char "FAKE" suffix) don't pass.
     #   2. --exclude="*_mac-*" scopes the scan to VPS-native transcripts —
     #      the *_mac-* files are historical mirrors synced from Joris's Mac,
     #      not live sessions run on this box; a VPS-native-only scan already

@@ -114,21 +114,31 @@ def test_audit_script_no_plaintext_secrets():
 
     Caveat: the audit's Part 6 transcript scan + Part 2 filesystem scan
     legitimately reference the credential PREFIXES as grep search patterns
-    (e.g. `grep -rlI -e "sk-or-v1-" ...`). Those prefixes are the search
-    needle, not credential values — they're 8-12 chars of structure with
-    NO actual secret bytes after them. We allow occurrences inside `-e
-    "<prefix>"` grep arguments and forbid them anywhere else.
+    (e.g. `grep -rlI -e "sk-or-v1-" ...`), and since board #916 both parts
+    use a prefix+SHAPE pattern (e.g. `grep -rlIE -e "sk-or-v1-[A-Za-z0-9]
+    {20,}" ...`) rather than a bare prefix. Those prefixes (bare or
+    shape-suffixed) are the search needle, not credential values — they're
+    8-12 chars of structure (plus, for the shape form, a *character class*
+    with NO actual secret bytes) with no real token attached. We allow
+    occurrences inside `-e "<prefix>"` / `-e "<prefix><shape-class>"` grep
+    arguments and forbid them anywhere else.
 
-    The test strips out lines containing `-e "<prefix>"` patterns before
+    The test strips out lines containing those grep-pattern forms before
     scanning for leaked literals. If a prefix appears anywhere ELSE
     (e.g. as `TOKEN=sk-or-v1-actualvaluehere`), the test fails loudly.
     """
     rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
 
-    # Strip lines that ONLY use the prefix as a grep search pattern.
-    # Match: optional whitespace + `-e ` + quote + prefix + quote + optional ` \`.
+    # Strip lines that ONLY use the prefix as a grep search pattern, either
+    # bare (`-e "sk-or-v1-"`) or shape-suffixed (`-e "sk-or-v1-[A-Za-z0-9]
+    # {20,}"` — board #916's prefix+entropy tightening). The optional group
+    # matches a bracket character class + `{N,}` quantifier; it never
+    # contains a literal secret, only regex metacharacters.
+    # Match: optional whitespace + `-e ` + quote + prefix + optional
+    # `[class]{N,}` + quote + optional ` \`.
     grep_pattern_re = re.compile(
-        r'^\s*-e\s+["\'](?:sk-or-v1-|sk-ant-oat01-|tskey-auth-|\^?TELEGRAM_BOT_TOKEN=)["\']\s*\\?\s*$'
+        r'^\s*-e\s+["\'](?:sk-or-v1-|sk-ant-oat01-|tskey-auth-|\^?TELEGRAM_BOT_TOKEN=)'
+        r'(?:\[[\w-]+\]\{\d+,\})?["\']\s*\\?\s*$'
     )
     safe_lines = [
         line for line in rendered.splitlines()
@@ -584,8 +594,11 @@ def test_part2_still_excludes_known_safe_locations():
         "--exclude-dir=/run",                 # tmpfs runtime env
         "--exclude-dir=bubble-vps-platform",  # spec docs reference prefixes
         "--exclude-dir=shared-wiki",          # NEW 2026-05-12
+        "--exclude-dir=deploy",               # NEW 2026-08-12 (#916): bubble-ops-loop/deploy
+        "--exclude-dir=hooks",                # NEW 2026-08-12 (#916): bubble-ops-loop/hooks
         "--exclude=security-audit.sh",        # the script itself
-        "--exclude=.credentials.json",        # claude CLI's own login store
+        '--exclude="*.bak-*"',                # NEW 2026-08-12 (#916): scanner's own backups
+        '--exclude=".credentials.json*"',     # NEW 2026-08-12 (#916): glob, was exact match
     ]
     for needle in required_excludes:
         assert needle in template, (
@@ -593,6 +606,147 @@ def test_part2_still_excludes_known_safe_locations():
             f"exclusions — dropping it would resurface a known false-positive "
             f"or expose a known-safe location to the scan."
         )
+
+
+# ─── Part 2 leak-scan: prefix+shape match behavioral fixture test ─────────
+
+
+def _extract_leak_scan_snippet(rendered: str) -> str:
+    """Pull the self-contained leak-detection logic out of Part 2, between
+    the `# BEGIN-LEAK-SCAN` / `# END-LEAK-SCAN` sentinel comments in the
+    .j2 template. Kept deliberately narrow (just leak_candidates ->
+    leak_files) so it can run standalone in a test harness without needing
+    the surrounding notes[]/score/log() plumbing.
+    """
+    start_marker = "# BEGIN-LEAK-SCAN"
+    end_marker = "# END-LEAK-SCAN"
+    start = rendered.index(start_marker)
+    end = rendered.index(end_marker)
+    assert start < end, "BEGIN-LEAK-SCAN must precede END-LEAK-SCAN in the template"
+    return rendered[start:end]
+
+
+def _run_leak_scan_fixture(rendered: str, scan_root: Path) -> list[str]:
+    """Render the extracted leak-scan snippet into a standalone bash script
+    and execute it against `scan_root`, returning the list of files it
+    flagged. `sudo` is stripped (the fixture dir is owned by the test user;
+    no elevation needed) and the hardcoded `/home /etc /root` scan roots are
+    swapped for the fixture directory. `local` is stripped too since the
+    snippet runs at script top-level here, not inside a bash function.
+    """
+    import subprocess
+
+    snippet = _extract_leak_scan_snippet(rendered)
+    snippet = snippet.replace("sudo grep", "grep")
+    snippet = snippet.replace("local ", "")
+    snippet = snippet.replace("/home /etc /root", str(scan_root))
+
+    script = "#!/usr/bin/env bash\nset -uo pipefail\n" + snippet + '\nprintf "%s" "$leak_files"\n'
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"Leak-scan fixture harness exited non-zero: {result.returncode}\n"
+        f"stdout={result.stdout!r} stderr={result.stderr!r}\nscript=\n{script}"
+    )
+    out = result.stdout.strip()
+    return [line for line in out.splitlines() if line]
+
+
+def test_part2_shape_match_catches_genuine_planted_token():
+    """Board #916 forbidden constraint: the shape-match tightening MUST
+    NOT loosen so far that a real leak is missed. Plant an obviously-fake
+    but genuine-SHAPED token (known prefix + 32 sequential/alphabet chars —
+    NOT a real secret value, same illustrative shape as the live `nfp_...`
+    leak in board #737) in a fixture file and confirm Part 2's actual
+    grep logic (extracted straight from the rendered template) still
+    flags it.
+    """
+    rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        scan_root = Path(td)
+        genuine = scan_root / "genuine"
+        genuine.mkdir()
+        # Obviously-fake planted token: sequential alphabet + digits, never
+        # a real secret value. Shape-matches sk-ant-oat01- + 20+ chars.
+        (genuine / "leak.txt").write_text(
+            "TOKEN=sk-ant-oat01-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n"
+        )
+
+        flagged = _run_leak_scan_fixture(rendered, scan_root)
+
+    assert any("genuine/leak.txt" in f for f in flagged), (
+        f"Shape-match tightening dropped a genuine-shaped planted token — "
+        f"this would mean a real leak (like board #737's live nfp_ token) "
+        f"could go undetected. Flagged files: {flagged}"
+    )
+
+
+def test_part2_shape_match_drops_artifact_classes():
+    """Board #916: the tightening must drop the ~17/18 artifact classes
+    identified in #905's triage while the genuine case above still fires.
+    Plant one fixture per artifact class and confirm NONE are flagged:
+
+      1. bare prefix literal (grep needle with no high-entropy tail)
+      2. this scanner's own `.bak-*` backup (excluded by --exclude)
+      3. a placeholder/fixture string with a FAKE marker (shape-matches
+         but is allowlisted by the placeholder recheck)
+      4. an output-guard.py-style hook file living in a `hooks/` dir
+         (excluded by --exclude-dir=hooks) that would otherwise shape-match
+      5. a `.credentials.json.disabled` rotated copy (excluded by the new
+         glob exclude)
+    """
+    rendered = _render("security-audit.sh.j2", **_DEFAULT_RENDER_KWARGS)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        scan_root = Path(td)
+
+        bare = scan_root / "bare_prefix"
+        bare.mkdir()
+        (bare / "reference.txt").write_text(
+            "# credential prefix reference: sk-or-v1-\n"
+        )
+
+        backup = scan_root / "scanner_backup"
+        backup.mkdir()
+        (backup / "security-audit.sh.bak-1755000000").write_text(
+            'grep -e "sk-or-v1-[A-Za-z0-9]{20,}" TOKEN=sk-or-v1-AAAAAAAAAAAAAAAAAAAAAAAA\n'
+        )
+
+        placeholder = scan_root / "placeholder"
+        placeholder.mkdir()
+        (placeholder / "fixture_doc.md") .write_text(
+            "example: sk-ant-oat01-FAKEFAKEFAKEFAKEFAKEFAKEFAKE (placeholder, not real)\n"
+        )
+
+        hooks = scan_root / "hooks"
+        hooks.mkdir()
+        (hooks / "output-guard.py").write_text(
+            'EXAMPLE = "sk-ant-oat01-AAAAAAAAAAAAAAAAAAAAAAAA"\n'
+        )
+
+        creds = scan_root / "creds"
+        creds.mkdir()
+        (creds / ".credentials.json.disabled").write_text(
+            'TOKEN=tskey-auth-AAAAAAAAAAAAAAAAAAAAAAAA\n'
+        )
+
+        flagged = _run_leak_scan_fixture(rendered, scan_root)
+
+    assert flagged == [], (
+        f"Shape-match + exclude tightening still flagged known artifact "
+        f"classes (bare prefix literal, own .bak-* backup, FAKE placeholder, "
+        f"hooks/ hook script, .credentials.json.disabled) — these should all "
+        f"be dropped per board #916. Flagged files: {flagged}"
+    )
 
 
 def test_telegram_post_respects_agentic_suppress_flag():
